@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="theme-color" content="#0a0a0c">
+  <meta name="theme-color" content="#000000">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Rehber">
   <title>Rehber</title>
@@ -16,10 +16,10 @@
     <form id="login-form" class="glass login-card">
       <div class="login-mark">R</div>
       <h1>Rehber</h1>
-      <p class="muted">Devam etmek icin giris yapin</p>
+      <p class="muted">Giris icin kullanici adi, sifre ve konum izni gerekir.</p>
       <input type="text" id="username" placeholder="Kullanici adi" autocomplete="username" required>
       <input type="password" id="password" placeholder="Sifre" autocomplete="current-password" required>
-      <button type="submit" class="btn-primary">Giris yap</button>
+      <button type="submit" class="btn-primary">Konum izniyle giris yap</button>
       <p id="login-error" class="error" role="alert"></p>
     </form>
   </section>
@@ -48,16 +48,13 @@
           <div class="glass stat"><b id="stat-fail">0</b><span>Basarisiz</span></div>
           <div class="glass stat"><b id="stat-blocked">0</b><span>Engelli</span></div>
         </div>
-
         <div class="section-head"><h2>Adresler</h2></div>
         <div id="ip-list" class="list"></div>
-
         <div class="section-head">
           <h2>Ayak izleri</h2>
           <button id="toggle-trail" class="pill glass">Ayrintili goster</button>
         </div>
         <div id="trail" class="list hidden"></div>
-
         <div class="section-head"><h2>Engellenenler</h2></div>
         <div id="blocked-list" class="list"></div>
       </div>
@@ -72,6 +69,40 @@
 
   <dialog id="view-dialog" class="sheet">
     <div id="view-body" class="sheet-body"></div>
+  </dialog>
+
+  <dialog id="bulk-dialog" class="sheet">
+    <div class="sheet-body form">
+      <div class="sheet-grip"></div>
+      <h2>Toplu iliski</h2>
+      <p class="muted">Secili kisi ile asagidaki kisiler arasinda tek seferde iliski kurulur.</p>
+
+      <fieldset>
+        <legend>Iliski turu</legend>
+        <select id="bulk-preset"></select>
+        <div class="row2">
+          <label>Secilen kisiler, bu kisinin:<input id="bulk-label" maxlength="60"></label>
+          <label>Bu kisi, onlarin:<input id="bulk-reverse" maxlength="60"></label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Kisi sec</legend>
+        <select id="bulk-group"></select>
+        <div class="pick-tools">
+          <span id="bulk-count" class="meta">0 kisi secili</span>
+          <button type="button" id="bulk-all" class="pill glass small">Tumunu sec</button>
+          <button type="button" id="bulk-none" class="pill glass small">Temizle</button>
+        </div>
+        <div id="bulk-list" class="pick-list"></div>
+      </fieldset>
+
+      <p id="bulk-error" class="error" role="alert"></p>
+      <div class="form-actions">
+        <button type="button" id="bulk-cancel" class="btn-ghost">Vazgec</button>
+        <button type="button" id="bulk-confirm" class="btn-primary">Onayla</button>
+      </div>
+    </div>
   </dialog>
 
   <dialog id="contact-dialog" class="sheet">
@@ -148,7 +179,7 @@
     <form id="reauth-form" class="sheet-body form">
       <div class="sheet-grip"></div>
       <h2>Sifrenizi tekrar girin</h2>
-      <p class="muted">Bu hassas bir islem. Devam etmek icin sifrenizi onaylayin.</p>
+      <p class="muted">Bu hassas bir islem. Devam etmek icin sifrenizi ve konum izninizi onaylayin.</p>
       <input type="password" id="reauth-password" placeholder="Sifre" autocomplete="current-password" required>
       <p id="reauth-error" class="error" role="alert"></p>
       <div class="form-actions">
