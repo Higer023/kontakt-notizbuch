@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kisisel Iletisim Rehberi</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+  <section id="login-view" class="center-screen hidden">
+    <form id="login-form" class="card narrow">
+      <h1>Giris</h1>
+      <input type="password" id="password" placeholder="Yonetici sifresi" autocomplete="current-password" required>
+      <button type="submit" class="btn primary">Giris yap</button>
+      <p id="login-error" class="error" role="alert"></p>
+    </form>
+  </section>
+
+  <section id="app-view" class="hidden">
+    <header class="topbar">
+      <h1>Not Defteri</h1>
+      <nav>
+        <button class="btn tab active" data-tab="contacts">Kisiler</button>
+        <button class="btn tab" data-tab="logs">Guvenlik Loglari</button>
+        <button id="logout-btn" class="btn ghost">Cikis</button>
+      </nav>
+    </header>
+
+    <main>
+      <div id="contacts-tab">
+        <div class="toolbar">
+          <input type="search" id="search" placeholder="Isim, sehir, etiket ara...">
+          <button id="add-btn" class="btn primary">+ Kisi ekle</button>
+        </div>
+        <div id="contacts-grid" class="grid"></div>
+      </div>
+
+      <div id="logs-tab" class="hidden">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Tarih</th><th>IP</th><th>Sonuc</th><th>Tarayici</th></tr></thead>
+            <tbody id="logs-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </section>
+
+  <dialog id="contact-dialog">
+    <form id="contact-form" method="dialog" class="form-grid">
+      <h2 id="dialog-title">Yeni kisi</h2>
+
+      <label>Isim *<input name="first_name" required maxlength="100"></label>
+      <label>Soyisim<input name="last_name" maxlength="100"></label>
+
+      <label>Dogum yili<input name="birth_year" type="number" min="1900" placeholder="Orn. 2006"></label>
+      <label>Dogum ayi<input name="birth_month" type="number" min="1" max="12"></label>
+      <label>Dogum gunu<input name="birth_day" type="number" min="1" max="31"></label>
+
+      <label>Sehir / Konum<input name="city" maxlength="100"></label>
+      <label>Telefon<input name="phone" type="tel" maxlength="30"></label>
+      <label class="full">E-posta<input name="email" type="email" maxlength="254"></label>
+
+      <fieldset class="full" id="socials-fieldset">
+        <legend>Sosyal medya</legend>
+        <div id="socials-list"></div>
+        <button type="button" id="add-social" class="btn ghost small">+ Hesap ekle</button>
+      </fieldset>
+
+      <label class="full">Etiketler<input name="tags" maxlength="300" placeholder="aile, is, spor"></label>
+      <label class="full">Notlar<textarea name="notes" rows="4" maxlength="5000"></textarea></label>
+
+      <label class="full">Fotograf<input type="file" id="photo-input" accept="image/jpeg,image/png,image/webp"></label>
+
+      <p id="form-error" class="error full" role="alert"></p>
+      <div class="full actions">
+        <button type="button" id="cancel-btn" class="btn ghost">Iptal</button>
+        <button type="submit" class="btn primary">Kaydet</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>
