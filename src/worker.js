@@ -2,25 +2,39 @@ const PBKDF2_ITER = 100000;
 const SESSION_HOURS = 8;
 const MAX_FAILS = 5;
 const LOCK_MINUTES = 15;
-const USERNAME_RE = /^[A-Za-z0-9._-]{1,100}$/;
+const USER_RE = /^[A-Za-z0-9._-]{1,100}$/;
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/;
 const PHONE_RE = /^[+0-9 ()-]{0,30}$/;
 
-const SOCIAL_BASE = {
-  instagram: 'https://instagram.com/',
-  twitter: 'https://x.com/',
-  x: 'https://x.com/',
-  linkedin: 'https://www.linkedin.com/in/',
-  facebook: 'https://facebook.com/',
-  github: 'https://github.com/',
-  tiktok: 'https://www.tiktok.com/@',
-  youtube: 'https://www.youtube.com/@',
+const SOCIAL = {
+  instagram: { slug: 'instagram', re: USER_RE, url: (u) => `https://instagram.com/${u}` },
+  x: { slug: 'x', re: USER_RE, url: (u) => `https://x.com/${u}` },
+  twitter: { slug: 'x', re: USER_RE, url: (u) => `https://x.com/${u}` },
+  linkedin: { slug: 'linkedin', re: USER_RE, url: (u) => `https://www.linkedin.com/in/${u}` },
+  facebook: { slug: 'facebook', re: USER_RE, url: (u) => `https://facebook.com/${u}` },
+  github: { slug: 'github', re: USER_RE, url: (u) => `https://github.com/${u}` },
+  tiktok: { slug: 'tiktok', re: USER_RE, url: (u) => `https://www.tiktok.com/@${u}` },
+  youtube: { slug: 'youtube', re: USER_RE, url: (u) => `https://www.youtube.com/@${u}` },
+  snapchat: { slug: 'snapchat', re: USER_RE, url: (u) => `https://www.snapchat.com/add/${u}` },
+  whatsapp: {
+    slug: 'whatsapp', re: /^\+?[0-9]{6,15}$/,
+    clean: (u) => u.replace(/\D/g, ''),
+    url: (u) => `https://wa.me/${u}`,
+  },
+  telegram: { slug: 'telegram', re: USER_RE, url: (u) => `https://t.me/${u}` },
+  pinterest: { slug: 'pinterest', re: USER_RE, url: (u) => `https://www.pinterest.com/${u}` },
+  reddit: { slug: 'reddit', re: USER_RE, url: (u) => `https://www.reddit.com/user/${u}` },
+  twitch: { slug: 'twitch', re: USER_RE, url: (u) => `https://www.twitch.tv/${u}` },
+  threads: { slug: 'threads', re: USER_RE, url: (u) => `https://www.threads.net/@${u}` },
+  bluesky: { slug: 'bluesky', re: USER_RE, url: (u) => `https://bsky.app/profile/${u}` },
+  medium: { slug: 'medium', re: USER_RE, url: (u) => `https://medium.com/@${u}` },
 };
 
 const SECURITY_HEADERS = {
   'Content-Security-Policy':
-    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
-    "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    "default-src 'self'; script-src 'self'; style-src 'self'; " +
+    "img-src 'self' data: https://cdn.simpleicons.org; connect-src 'self'; " +
+    "frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
   'Referrer-Policy': 'no-referrer',
@@ -67,6 +81,7 @@ async function handleApi(request, env, url) {
   if (pathname === '/api/logs' && method === 'GET') return listLogs(env);
   if (pathname === '/api/contacts' && method === 'GET') return listContacts(env, url);
   if (pathname === '/api/contacts' && method === 'POST') return createContact(request, env);
+  if (pathname === '/api/relations' && method === 'POST') return createRelation(request, env);
 
   const contactMatch = pathname.match(/^\/api\/contacts\/(\d+)$/);
   if (contactMatch) {
@@ -75,6 +90,9 @@ async function handleApi(request, env, url) {
     if (method === 'PUT') return updateContact(request, env, id);
     if (method === 'DELETE') return deleteContact(env, id);
   }
+
+  const relMatch = pathname.match(/^\/api\/relations\/(\d+)$/);
+  if (relMatch && method === 'DELETE') return deleteRelation(env, Number(relMatch[1]));
 
   throw new HttpError(404, 'Bulunamadi');
 }
@@ -98,10 +116,8 @@ async function login(request, env) {
 
   const ok =
     !!admin &&
-    username.length > 0 &&
-    username.length <= 100 &&
-    password.length > 0 &&
-    password.length <= 1024 &&
+    username.length > 0 && username.length <= 100 &&
+    password.length > 0 && password.length <= 1024 &&
     timingSafeEqualStr(username, admin.username) &&
     (await verifyPassword(password, admin.password_hash));
 
@@ -115,9 +131,7 @@ async function login(request, env) {
   await env.DB.prepare("INSERT INTO sessions (token_hash, expires_at) VALUES (?, datetime('now', ?))")
     .bind(await sha256(token), `+${SESSION_HOURS} hours`).run();
 
-  return json({ ok: true }, 200, {
-    'Set-Cookie': sessionCookie(token, SESSION_HOURS * 3600),
-  });
+  return json({ ok: true }, 200, { 'Set-Cookie': sessionCookie(token, SESSION_HOURS * 3600) });
 }
 
 async function logout(request, env) {
@@ -148,12 +162,8 @@ async function verifyPassword(password, stored) {
 }
 
 async function pbkdf2(password, salt, iterations) {
-  const key = await crypto.subtle.importKey(
-    'raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']
-  );
-  const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' }, key, 256
-  );
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations, hash: 'SHA-256' }, key, 256);
   return new Uint8Array(bits);
 }
 
@@ -175,33 +185,54 @@ async function listLogs(env) {
 
 async function listContacts(env, url) {
   const q = (url.searchParams.get('q') || '').trim().slice(0, 100);
-  let stmt;
+  const group = (url.searchParams.get('group') || '').trim().slice(0, 60);
+  const where = [];
+  const binds = [];
   if (q) {
     const like = `%${q}%`;
-    stmt = env.DB.prepare(
-      `SELECT * FROM contacts
-       WHERE first_name LIKE ? OR last_name LIKE ? OR city LIKE ? OR tags LIKE ? OR email LIKE ?
-       ORDER BY first_name COLLATE NOCASE, last_name COLLATE NOCASE LIMIT 500`
-    ).bind(like, like, like, like, like);
-  } else {
-    stmt = env.DB.prepare(
-      'SELECT * FROM contacts ORDER BY first_name COLLATE NOCASE, last_name COLLATE NOCASE LIMIT 500'
-    );
+    where.push('(first_name LIKE ? OR last_name LIKE ? OR nickname LIKE ? OR city LIKE ? OR school LIKE ? OR group_name LIKE ? OR occupation LIKE ? OR tags LIKE ? OR email LIKE ?)');
+    binds.push(like, like, like, like, like, like, like, like, like);
   }
-  const { results } = await stmt.all();
+  if (group) {
+    where.push('group_name = ?');
+    binds.push(group);
+  }
+  const sql = `SELECT * FROM contacts ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+    ORDER BY first_name COLLATE NOCASE, last_name COLLATE NOCASE LIMIT 500`;
+  const { results } = await env.DB.prepare(sql).bind(...binds).all();
   return json({ contacts: results.map(formatContact) });
 }
 
 async function getContact(env, id) {
   const row = await findContact(env, id);
-  return json({ contact: formatContact(row) });
+  const { results } = await env.DB.prepare(
+    `SELECT r.id, r.from_id, r.to_id, r.label, r.reverse_label, r.note,
+            c.first_name AS other_first, c.last_name AS other_last
+     FROM relations r
+     JOIN contacts c ON c.id = CASE WHEN r.from_id = ? THEN r.to_id ELSE r.from_id END
+     WHERE r.from_id = ? OR r.to_id = ?
+     ORDER BY r.id`
+  ).bind(id, id, id).all();
+
+  const relations = results.map((r) => {
+    const iAmFrom = r.from_id === id;
+    return {
+      id: r.id,
+      other_id: iAmFrom ? r.to_id : r.from_id,
+      other_name: [r.other_first, r.other_last].filter(Boolean).join(' '),
+      role: iAmFrom ? r.label : (r.reverse_label || r.label),
+      note: r.note,
+    };
+  });
+  return json({ contact: { ...formatContact(row), relations } });
 }
 
 async function createContact(request, env) {
   const data = sanitizeContact(await readJson(request));
   const row = await env.DB.prepare(
-    `INSERT INTO contacts (first_name, last_name, birth_year, birth_month, birth_day, city, phone, email, socials, notes, tags)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`
+    `INSERT INTO contacts (first_name, last_name, nickname, birth_year, birth_month, birth_day, birthplace, city,
+       school, group_name, occupation, how_we_met, phone, email, website, socials, notes, tags)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`
   ).bind(...contactValues(data)).first();
   return json({ contact: formatContact(row) }, 201);
 }
@@ -210,8 +241,9 @@ async function updateContact(request, env, id) {
   await findContact(env, id);
   const data = sanitizeContact(await readJson(request));
   const row = await env.DB.prepare(
-    `UPDATE contacts SET first_name = ?, last_name = ?, birth_year = ?, birth_month = ?, birth_day = ?,
-       city = ?, phone = ?, email = ?, socials = ?, notes = ?, tags = ?, updated_at = datetime('now')
+    `UPDATE contacts SET first_name = ?, last_name = ?, nickname = ?, birth_year = ?, birth_month = ?, birth_day = ?,
+       birthplace = ?, city = ?, school = ?, group_name = ?, occupation = ?, how_we_met = ?, phone = ?, email = ?,
+       website = ?, socials = ?, notes = ?, tags = ?, updated_at = datetime('now')
      WHERE id = ? RETURNING *`
   ).bind(...contactValues(data), id).first();
   return json({ contact: formatContact(row) });
@@ -219,7 +251,39 @@ async function updateContact(request, env, id) {
 
 async function deleteContact(env, id) {
   await findContact(env, id);
-  await env.DB.prepare('DELETE FROM contacts WHERE id = ?').bind(id).run();
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM relations WHERE from_id = ? OR to_id = ?').bind(id, id),
+    env.DB.prepare('DELETE FROM contacts WHERE id = ?').bind(id),
+  ]);
+  return json({ ok: true });
+}
+
+async function createRelation(request, env) {
+  const body = await readJson(request);
+  const fromId = Number(body.from_id);
+  const toId = Number(body.to_id);
+  if (!Number.isInteger(fromId) || !Number.isInteger(toId) || fromId === toId) {
+    throw new HttpError(400, 'Gecersiz kisi secimi');
+  }
+  const label = typeof body.label === 'string' ? body.label.trim().slice(0, 60) : '';
+  if (!label) throw new HttpError(400, 'Iliski etiketi zorunludur');
+  const reverse = typeof body.reverse_label === 'string' ? body.reverse_label.trim().slice(0, 60) : '';
+  const note = typeof body.note === 'string' ? body.note.trim().slice(0, 300) : null;
+
+  await findContact(env, fromId);
+  await findContact(env, toId);
+  try {
+    await env.DB.prepare(
+      'INSERT INTO relations (from_id, to_id, label, reverse_label, note) VALUES (?, ?, ?, ?, ?)'
+    ).bind(fromId, toId, label, reverse || null, note || null).run();
+  } catch {
+    throw new HttpError(409, 'Bu iliski zaten var');
+  }
+  return json({ ok: true }, 201);
+}
+
+async function deleteRelation(env, id) {
+  await env.DB.prepare('DELETE FROM relations WHERE id = ?').bind(id).run();
   return json({ ok: true });
 }
 
@@ -249,13 +313,25 @@ function sanitizeContact(input) {
   const phone = str(input.phone, 30);
   if (phone && !PHONE_RE.test(phone)) throw new HttpError(400, 'Gecersiz telefon');
 
+  const website = str(input.website, 300);
+  if (website) {
+    try {
+      const u = new URL(website);
+      if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new Error();
+    } catch {
+      throw new HttpError(400, 'Gecersiz web sitesi (http/https ile baslamali)');
+    }
+  }
+
   const socials = [];
   if (Array.isArray(input.socials)) {
-    for (const s of input.socials.slice(0, 20)) {
+    for (const s of input.socials.slice(0, 30)) {
       const platform = typeof s?.platform === 'string' ? s.platform.toLowerCase() : '';
-      const username = typeof s?.username === 'string' ? s.username.trim().replace(/^@/, '') : '';
-      if (!SOCIAL_BASE[platform]) continue;
-      if (!USERNAME_RE.test(username)) throw new HttpError(400, `Gecersiz kullanici adi: ${platform}`);
+      const cfg = SOCIAL[platform];
+      if (!cfg) continue;
+      let username = typeof s.username === 'string' ? s.username.trim().replace(/^@/, '') : '';
+      if (cfg.clean) username = cfg.clean(username);
+      if (!cfg.re.test(username)) throw new HttpError(400, `Gecersiz hesap bilgisi: ${platform}`);
       socials.push({ platform, username });
     }
   }
@@ -263,12 +339,19 @@ function sanitizeContact(input) {
   return {
     first_name: firstName,
     last_name: str(input.last_name, 100),
+    nickname: str(input.nickname, 60),
     birth_year: int(input.birth_year, 1900, new Date().getFullYear()),
     birth_month: int(input.birth_month, 1, 12),
     birth_day: int(input.birth_day, 1, 31),
+    birthplace: str(input.birthplace, 100),
     city: str(input.city, 100),
+    school: str(input.school, 120),
+    group_name: str(input.group_name, 60),
+    occupation: str(input.occupation, 100),
+    how_we_met: str(input.how_we_met, 500),
     phone,
     email,
+    website,
     socials,
     notes: str(input.notes, 5000),
     tags: str(input.tags, 300),
@@ -277,29 +360,41 @@ function sanitizeContact(input) {
 
 function contactValues(d) {
   return [
-    d.first_name, d.last_name, d.birth_year, d.birth_month, d.birth_day,
-    d.city, d.phone, d.email, JSON.stringify(d.socials), d.notes, d.tags,
+    d.first_name, d.last_name, d.nickname, d.birth_year, d.birth_month, d.birth_day, d.birthplace, d.city,
+    d.school, d.group_name, d.occupation, d.how_we_met, d.phone, d.email, d.website,
+    JSON.stringify(d.socials), d.notes, d.tags,
   ];
 }
 
 function formatContact(row) {
-  const socials = JSON.parse(row.socials || '[]').map((s) => ({
-    platform: s.platform,
-    username: s.username,
-    url: SOCIAL_BASE[s.platform] + encodeURIComponent(s.username),
-  }));
+  const socials = JSON.parse(row.socials || '[]').map((s) => {
+    const cfg = SOCIAL[s.platform];
+    return {
+      platform: s.platform,
+      username: s.username,
+      url: cfg ? cfg.url(encodeURIComponent(s.username)) : null,
+      icon: cfg ? `https://cdn.simpleicons.org/${cfg.slug}` : null,
+    };
+  });
   return {
     id: row.id,
     first_name: row.first_name,
     last_name: row.last_name,
+    nickname: row.nickname,
     birth_year: row.birth_year,
     birth_month: row.birth_month,
     birth_day: row.birth_day,
     age: computeAge(row),
     age_exact: !!(row.birth_year && row.birth_month && row.birth_day),
+    birthplace: row.birthplace,
     city: row.city,
+    school: row.school,
+    group_name: row.group_name,
+    occupation: row.occupation,
+    how_we_met: row.how_we_met,
     phone: row.phone,
     email: row.email,
+    website: row.website,
     socials,
     notes: row.notes,
     tags: row.tags,
@@ -336,11 +431,7 @@ async function readJson(request) {
 function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-      'Cache-Control': 'no-store',
-      ...extraHeaders,
-    },
+    headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...extraHeaders },
   });
 }
 

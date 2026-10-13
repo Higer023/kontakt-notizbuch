@@ -23,12 +23,19 @@ CREATE TABLE IF NOT EXISTS contacts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   first_name TEXT NOT NULL,
   last_name TEXT,
+  nickname TEXT,
   birth_year INTEGER,
   birth_month INTEGER,
   birth_day INTEGER,
+  birthplace TEXT,
   city TEXT,
+  school TEXT,
+  group_name TEXT,
+  occupation TEXT,
+  how_we_met TEXT,
   phone TEXT,
   email TEXT,
+  website TEXT,
   socials TEXT NOT NULL DEFAULT '[]',
   notes TEXT,
   tags TEXT,
@@ -36,3 +43,17 @@ CREATE TABLE IF NOT EXISTS contacts (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_contacts_name ON contacts (first_name, last_name);
+CREATE INDEX IF NOT EXISTS idx_contacts_group ON contacts (group_name);
+
+CREATE TABLE IF NOT EXISTS relations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  from_id INTEGER NOT NULL,
+  to_id INTEGER NOT NULL,
+  label TEXT NOT NULL,
+  reverse_label TEXT,
+  note TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (from_id, to_id, label)
+);
+CREATE INDEX IF NOT EXISTS idx_relations_from ON relations (from_id);
+CREATE INDEX IF NOT EXISTS idx_relations_to ON relations (to_id);
