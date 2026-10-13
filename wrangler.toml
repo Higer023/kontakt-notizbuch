@@ -10,7 +10,3 @@ binding = "ASSETS"
 binding = "DB"
 database_name = "kontakt-db"
 database_id = "REPLACE_WITH_D1_DATABASE_ID"
-
-[[r2_buckets]]
-binding = "PHOTOS"
-bucket_name = "kontakt-photos"

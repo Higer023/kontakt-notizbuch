@@ -2,8 +2,6 @@ const PBKDF2_ITER = 100000;
 const SESSION_HOURS = 8;
 const MAX_FAILS = 5;
 const LOCK_MINUTES = 15;
-const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
-const PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const USERNAME_RE = /^[A-Za-z0-9._-]{1,100}$/;
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/;
 const PHONE_RE = /^[+0-9 ()-]{0,30}$/;
@@ -21,7 +19,7 @@ const SOCIAL_BASE = {
 
 const SECURITY_HEADERS = {
   'Content-Security-Policy':
-    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; " +
+    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
     "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
@@ -78,14 +76,6 @@ async function handleApi(request, env, url) {
     if (method === 'DELETE') return deleteContact(env, id);
   }
 
-  const photoUploadMatch = pathname.match(/^\/api\/contacts\/(\d+)\/photo$/);
-  if (photoUploadMatch && method === 'POST') {
-    return uploadPhoto(request, env, Number(photoUploadMatch[1]));
-  }
-
-  const photoGetMatch = pathname.match(/^\/api\/photos\/(\d+)$/);
-  if (photoGetMatch && method === 'GET') return getPhoto(env, Number(photoGetMatch[1]));
-
   throw new HttpError(404, 'Bulunamadi');
 }
 
@@ -102,19 +92,23 @@ async function login(request, env) {
   }
 
   const body = await readJson(request);
+  const username = typeof body.username === 'string' ? body.username.trim() : '';
   const password = typeof body.password === 'string' ? body.password : '';
-  const admin = await env.DB.prepare('SELECT password_hash FROM admin WHERE id = 1').first();
+  const admin = await env.DB.prepare('SELECT username, password_hash FROM admin WHERE id = 1').first();
 
   const ok =
     !!admin &&
+    username.length > 0 &&
+    username.length <= 100 &&
     password.length > 0 &&
     password.length <= 1024 &&
+    timingSafeEqualStr(username, admin.username) &&
     (await verifyPassword(password, admin.password_hash));
 
   await env.DB.prepare('INSERT INTO login_logs (ip, success, user_agent) VALUES (?, ?, ?)')
     .bind(ip, ok ? 1 : 0, ua).run();
 
-  if (!ok) throw new HttpError(401, 'Hatali sifre');
+  if (!ok) throw new HttpError(401, 'Kullanici adi veya sifre hatali');
 
   await env.DB.prepare("DELETE FROM sessions WHERE expires_at < datetime('now')").run();
   const token = randomToken();
@@ -142,12 +136,6 @@ async function requireSession(request, env) {
   ).bind(await sha256(token)).first();
 }
 
-async function hashPassword(password) {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const bits = await pbkdf2(password, salt, PBKDF2_ITER);
-  return `pbkdf2$${PBKDF2_ITER}$${b64(salt)}$${b64(bits)}`;
-}
-
 async function verifyPassword(password, stored) {
   const [scheme, iterStr, saltB64, hashB64] = stored.split('$');
   if (scheme !== 'pbkdf2') return false;
@@ -167,6 +155,15 @@ async function pbkdf2(password, salt, iterations) {
     { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' }, key, 256
   );
   return new Uint8Array(bits);
+}
+
+function timingSafeEqualStr(a, b) {
+  const ea = new TextEncoder().encode(a);
+  const eb = new TextEncoder().encode(b);
+  if (ea.length !== eb.length) return false;
+  let diff = 0;
+  for (let i = 0; i < ea.length; i++) diff |= ea[i] ^ eb[i];
+  return diff === 0;
 }
 
 async function listLogs(env) {
@@ -221,8 +218,7 @@ async function updateContact(request, env, id) {
 }
 
 async function deleteContact(env, id) {
-  const existing = await findContact(env, id);
-  if (existing.photo_key) await env.PHOTOS.delete(existing.photo_key);
+  await findContact(env, id);
   await env.DB.prepare('DELETE FROM contacts WHERE id = ?').bind(id).run();
   return json({ ok: true });
 }
@@ -307,7 +303,6 @@ function formatContact(row) {
     socials,
     notes: row.notes,
     tags: row.tags,
-    photo_url: row.photo_key ? `/api/photos/${row.id}` : null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -323,42 +318,6 @@ function computeAge(row) {
     if (m < row.birth_month || (m === row.birth_month && row.birth_day && d < row.birth_day)) age--;
   }
   return age;
-}
-
-async function uploadPhoto(request, env, id) {
-  const contact = await findContact(env, id);
-
-  const type = (request.headers.get('Content-Type') || '').split(';')[0].trim();
-  if (!PHOTO_TYPES.has(type)) throw new HttpError(415, 'Yalnizca JPEG, PNG veya WebP');
-
-  const declared = Number(request.headers.get('Content-Length') || 0);
-  if (declared > MAX_PHOTO_BYTES) throw new HttpError(413, 'Fotograf en fazla 5 MB olabilir');
-
-  const buffer = await request.arrayBuffer();
-  if (buffer.byteLength === 0 || buffer.byteLength > MAX_PHOTO_BYTES) {
-    throw new HttpError(413, 'Gecersiz fotograf boyutu');
-  }
-
-  const key = `contacts/${id}/${crypto.randomUUID()}`;
-  await env.PHOTOS.put(key, buffer, { httpMetadata: { contentType: type } });
-  await env.DB.prepare("UPDATE contacts SET photo_key = ?, updated_at = datetime('now') WHERE id = ?")
-    .bind(key, id).run();
-
-  if (contact.photo_key) await env.PHOTOS.delete(contact.photo_key);
-  return json({ photo_url: `/api/photos/${id}` });
-}
-
-async function getPhoto(env, id) {
-  const contact = await findContact(env, id);
-  if (!contact.photo_key) throw new HttpError(404, 'Fotograf yok');
-  const object = await env.PHOTOS.get(contact.photo_key);
-  if (!object) throw new HttpError(404, 'Fotograf bulunamadi');
-  return new Response(object.body, {
-    headers: {
-      'Content-Type': object.httpMetadata?.contentType || 'application/octet-stream',
-      'Cache-Control': 'private, max-age=300',
-    },
-  });
 }
 
 async function readJson(request) {

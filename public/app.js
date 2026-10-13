@@ -13,7 +13,7 @@ function esc(value) {
 
 async function api(path, options = {}) {
   const opts = { credentials: 'same-origin', ...options, headers: { ...(options.headers || {}) } };
-  if (options.body && !(options.body instanceof Blob)) {
+  if (options.body) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(options.body);
   }
@@ -31,20 +31,23 @@ function showLogin() {
   $('#app-view').classList.add('hidden');
   $('#login-view').classList.remove('hidden');
   $('#password').value = '';
-  $('#password').focus();
+  $('#username').focus();
 }
 
 function showApp() {
   $('#login-view').classList.add('hidden');
   $('#app-view').classList.remove('hidden');
-  loadContacts();
+  loadContacts().catch(alertError);
 }
 
 $('#login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   $('#login-error').textContent = '';
   try {
-    await api('/api/login', { method: 'POST', body: { password: $('#password').value } });
+    await api('/api/login', {
+      method: 'POST',
+      body: { username: $('#username').value, password: $('#password').value },
+    });
     showApp();
   } catch (err) {
     $('#login-error').textContent = err.message;
@@ -86,12 +89,8 @@ function renderContacts() {
 function cardHtml(c) {
   const fullName = [c.first_name, c.last_name].filter(Boolean).join(' ');
   const initials = (c.first_name[0] || '?').toUpperCase();
-  const avatar = c.photo_url
-    ? `<img class="avatar" src="${esc(c.photo_url)}" alt="">`
-    : `<div class="avatar">${esc(initials)}</div>`;
-
   const ageText = c.age !== null ? `${c.age} yas${c.age_exact ? '' : ' (yaklasik)'}` : '';
-  const meta = [ageText, c.city].filter(Boolean).join(' · ');
+  const meta = [ageText, c.city].filter(Boolean).join(' - ');
   const tags = (c.tags || '').split(',').map((t) => t.trim()).filter(Boolean);
   const socials = c.socials
     .map((s) => `<a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer nofollow">${esc(s.platform)}: @${esc(s.username)}</a>`)
@@ -100,7 +99,7 @@ function cardHtml(c) {
   return `
     <article class="contact-card">
       <div class="contact-head">
-        ${avatar}
+        <div class="avatar">${esc(initials)}</div>
         <div>
           <div class="contact-name">${esc(fullName)}</div>
           <div class="meta">${esc(meta)}</div>
@@ -150,7 +149,6 @@ function openDialog(contact = null) {
   form.reset();
   $('#socials-list').innerHTML = '';
   $('#form-error').textContent = '';
-  $('#photo-input').value = '';
   editingId = contact ? contact.id : null;
   $('#dialog-title').textContent = contact ? 'Kisiyi duzenle' : 'Yeni kisi';
 
@@ -193,17 +191,10 @@ $('#contact-form').addEventListener('submit', async (e) => {
   };
 
   try {
-    const saved = editingId
-      ? await api(`/api/contacts/${editingId}`, { method: 'PUT', body })
-      : await api('/api/contacts', { method: 'POST', body });
-
-    const file = $('#photo-input').files[0];
-    if (file) {
-      await api(`/api/contacts/${saved.contact.id}/photo`, {
-        method: 'POST',
-        headers: { 'Content-Type': file.type },
-        body: file,
-      });
+    if (editingId) {
+      await api(`/api/contacts/${editingId}`, { method: 'PUT', body });
+    } else {
+      await api('/api/contacts', { method: 'POST', body });
     }
     $('#contact-dialog').close();
     await loadContacts();

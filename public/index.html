@@ -11,7 +11,8 @@
   <section id="login-view" class="center-screen hidden">
     <form id="login-form" class="card narrow">
       <h1>Giris</h1>
-      <input type="password" id="password" placeholder="Yonetici sifresi" autocomplete="current-password" required>
+      <input type="text" id="username" placeholder="Kullanici adi" autocomplete="username" required>
+      <input type="password" id="password" placeholder="Sifre" autocomplete="current-password" required>
       <button type="submit" class="btn primary">Giris yap</button>
       <p id="login-error" class="error" role="alert"></p>
     </form>
@@ -70,8 +71,6 @@
 
       <label class="full">Etiketler<input name="tags" maxlength="300" placeholder="aile, is, spor"></label>
       <label class="full">Notlar<textarea name="notes" rows="4" maxlength="5000"></textarea></label>
-
-      <label class="full">Fotograf<input type="file" id="photo-input" accept="image/jpeg,image/png,image/webp"></label>
 
       <p id="form-error" class="error full" role="alert"></p>
       <div class="full actions">
