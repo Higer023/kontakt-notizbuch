@@ -4,6 +4,7 @@ const REAUTH_MINUTES = 5;
 const MAX_FAILS = 5;
 const LOCK_MINUTES = 15;
 const RATE_PER_MINUTE = 120;
+const BULK_MAX = 90;
 const USER_RE = /^[A-Za-z0-9._-]{1,100}$/;
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/;
 const PHONE_RE = /^[+0-9 ()-]{0,30}$/;
@@ -37,7 +38,7 @@ const SECURITY_HEADERS = {
   'X-Frame-Options': 'DENY',
   'Referrer-Policy': 'no-referrer',
   'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
-  'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=(self)',
   'Cache-Control': 'no-store',
 };
 
@@ -75,7 +76,6 @@ async function handleApi(request, env, url) {
   const method = request.method;
   const ip = clientIp(request);
 
-  // CSRF ve kotu niyetli cross-origin istekler: yalnizca ayni kaynaktan yazma
   if (method !== 'GET') {
     const origin = request.headers.get('Origin');
     if (origin && origin !== url.origin) throw new HttpError(403, 'Istek reddedildi');
@@ -111,6 +111,7 @@ async function handleApi(request, env, url) {
   if (pathname === '/api/contacts' && method === 'GET') return listContacts(env, url);
   if (pathname === '/api/contacts' && method === 'POST') return createContact(request, env);
   if (pathname === '/api/relations' && method === 'POST') return createRelation(request, env);
+  if (pathname === '/api/relations/bulk' && method === 'POST') return bulkRelations(request, env);
 
   const contactMatch = pathname.match(/^\/api\/contacts\/(\d+)$/);
   if (contactMatch) {
@@ -150,26 +151,33 @@ async function isBlocked(env, ip) {
   return !!row;
 }
 
-// Ayak izi: istemci parmak izi + sunucu tarafi bilgiler (ulke, sehir, dil, yonlendiren)
+// Konum izni zorunlu: konum yoksa giris yapilamaz
+function hasGeo(body) {
+  const g = body && body.fp && body.fp.geo;
+  return !!g && typeof g.lat === 'number' && typeof g.lon === 'number'
+    && Math.abs(g.lat) <= 90 && Math.abs(g.lon) <= 180;
+}
+
 function footprintJson(request, clientFp) {
   const cf = request.cf || {};
   const server = {
     country: cf.country || null,
     city: cf.city || null,
     region: cf.region || null,
+    postal: cf.postalCode || null,
     asn: cf.asn || null,
     org: cf.asOrganization || null,
     colo: cf.colo || null,
     accept_language: (request.headers.get('Accept-Language') || '').slice(0, 120) || null,
     referer: (request.headers.get('Referer') || '').slice(0, 200) || null,
     tls: cf.tlsVersion || null,
+    http: request.cf?.httpProtocol || null,
   };
   let client = null;
   if (clientFp && typeof clientFp === 'object') {
-    client = JSON.stringify(clientFp).slice(0, 3000);
-    client = JSON.parse(client);
+    client = JSON.parse(JSON.stringify(clientFp).slice(0, 3500));
   }
-  return JSON.stringify({ client, server }).slice(0, 6000);
+  return JSON.stringify({ client, server }).slice(0, 7000);
 }
 
 async function recordFootprint(env, request, ip, event, success, clientFp) {
@@ -201,6 +209,11 @@ async function login(request, env, ip) {
   }
 
   const body = await readJson(request);
+  if (!hasGeo(body)) {
+    await recordFootprint(env, request, ip, 'login_no_geo', false, body.fp);
+    throw new HttpError(403, 'Konum izni olmadan giris yapilamaz');
+  }
+
   const username = typeof body.username === 'string' ? body.username.trim().slice(0, 100) : '';
   const password = typeof body.password === 'string' ? body.password : '';
   const ok = username.length > 0 && (await verifyAdminPassword(env, username, password));
@@ -222,6 +235,10 @@ async function reauth(request, env, ip, session) {
     throw new HttpError(429, 'Cok fazla hatali deneme. Lutfen daha sonra tekrar deneyin.');
   }
   const body = await readJson(request);
+  if (!hasGeo(body)) {
+    await recordFootprint(env, request, ip, 'reauth_no_geo', false, body.fp);
+    throw new HttpError(403, 'Konum izni olmadan islem yapilamaz');
+  }
   const password = typeof body.password === 'string' ? body.password : '';
   const ok = await verifyAdminPassword(env, null, password);
   await recordFootprint(env, request, ip, 'reauth', ok, body.fp);
@@ -248,8 +265,6 @@ async function requireSession(request, env) {
   if (!row) return null;
   return { token_hash: row.token_hash, fresh: !!row.fresh };
 }
-
-// ---------- Guvenlik ----------
 
 function parseJsonSafe(text) {
   try {
@@ -306,8 +321,6 @@ async function unblockIp(env, url) {
   return json({ ok: true });
 }
 
-// ---------- Sifre ----------
-
 async function verifyPassword(password, stored) {
   const [scheme, iterStr, saltB64, hashB64] = stored.split('$');
   if (scheme !== 'pbkdf2') return false;
@@ -333,8 +346,6 @@ function timingSafeEqualStr(a, b) {
   for (let i = 0; i < ea.length; i++) diff |= ea[i] ^ eb[i];
   return diff === 0;
 }
-
-// ---------- Kisiler ----------
 
 async function listContacts(env, url) {
   const q = (url.searchParams.get('q') || '').trim().slice(0, 100);
@@ -421,18 +432,41 @@ async function createRelation(request, env) {
   const label = typeof body.label === 'string' ? body.label.trim().slice(0, 60) : '';
   if (!label) throw new HttpError(400, 'Iliski etiketi zorunludur');
   const reverse = typeof body.reverse_label === 'string' ? body.reverse_label.trim().slice(0, 60) : '';
-  const note = typeof body.note === 'string' ? body.note.trim().slice(0, 300) : null;
 
   await findContact(env, fromId);
   await findContact(env, toId);
   try {
     await env.DB.prepare(
-      'INSERT INTO relations (from_id, to_id, label, reverse_label, note) VALUES (?, ?, ?, ?, ?)'
-    ).bind(fromId, toId, label, reverse || null, note || null).run();
+      'INSERT INTO relations (from_id, to_id, label, reverse_label) VALUES (?, ?, ?, ?)'
+    ).bind(fromId, toId, label, reverse || null).run();
   } catch {
     throw new HttpError(409, 'Bu iliski zaten var');
   }
   return json({ ok: true }, 201);
+}
+
+// Toplu iliski: secilen tum kisilerle tek seferde baglanti
+async function bulkRelations(request, env) {
+  const body = await readJson(request);
+  const fromId = Number(body.from_id);
+  const label = typeof body.label === 'string' ? body.label.trim().slice(0, 60) : '';
+  const reverse = typeof body.reverse_label === 'string' ? body.reverse_label.trim().slice(0, 60) : '';
+  const ids = Array.isArray(body.to_ids)
+    ? [...new Set(body.to_ids.map(Number))].filter((n) => Number.isInteger(n) && n !== fromId).slice(0, BULK_MAX)
+    : [];
+  if (!Number.isInteger(fromId) || !ids.length || !label) throw new HttpError(400, 'Eksik bilgi');
+
+  await findContact(env, fromId);
+  const { results } = await env.DB.prepare(
+    `SELECT id FROM contacts WHERE id IN (${ids.map(() => '?').join(',')})`
+  ).bind(...ids).all();
+
+  const stmts = results.map((r) =>
+    env.DB.prepare('INSERT OR IGNORE INTO relations (from_id, to_id, label, reverse_label) VALUES (?, ?, ?, ?)')
+      .bind(fromId, r.id, label, reverse || null)
+  );
+  if (stmts.length) await env.DB.batch(stmts);
+  return json({ added: stmts.length }, 201);
 }
 
 async function deleteRelation(env, id) {
@@ -489,7 +523,6 @@ function sanitizeContact(input) {
     }
   }
 
-  // Ozel alanlar: serbest etiket + deger (ek telefon, ozel tarih, not vb.)
   const extra = [];
   if (Array.isArray(input.extra)) {
     for (const x of input.extra.slice(0, 25)) {
@@ -579,8 +612,6 @@ function computeAge(row) {
   }
   return age;
 }
-
-// ---------- Yardimcilar ----------
 
 async function readJson(request) {
   if (!(request.headers.get('Content-Type') || '').includes('application/json')) {
