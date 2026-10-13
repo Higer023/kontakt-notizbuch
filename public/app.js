@@ -11,6 +11,7 @@ let editingId = null;
 let viewingId = null;
 let searchTimer = null;
 let trailOpen = false;
+let reauthPending = null;
 
 function esc(value) {
   const d = document.createElement('div');
@@ -18,31 +19,103 @@ function esc(value) {
   return d.innerHTML;
 }
 
-function hueOf(text) {
-  let h = 0;
-  for (const ch of text) h = (h * 31 + ch.charCodeAt(0)) % 360;
-  return h;
+function fullName(c) {
+  return [c.first_name, c.last_name].filter(Boolean).join(' ');
 }
 
-async function api(path, options = {}) {
+// ---------- Ag katmani ----------
+
+async function api(path, options = {}, retried = false) {
   const opts = { credentials: 'same-origin', ...options, headers: { ...(options.headers || {}) } };
   if (options.body) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(options.body);
   }
   const res = await fetch(path, opts);
-  if (res.status === 401 && path !== '/api/login') {
+  const data = await res.json().catch(() => ({}));
+
+  if (res.status === 428 && !retried) {
+    await requestReauth();
+    return api(path, options, true);
+  }
+  if (res.status === 401 && path !== '/api/login' && path !== '/api/reauth') {
     showLogin();
     throw new Error('Oturum sona erdi');
   }
-  const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Islem basarisiz');
   return data;
 }
 
-function fullName(c) {
-  return [c.first_name, c.last_name].filter(Boolean).join(' ');
+// Ayak izi: cihaz ve tarayici bilgileri (sifre ile birlikte gonderilir)
+async function getFingerprint() {
+  const fp = {
+    screen: `${screen.width}x${screen.height}`,
+    dpr: window.devicePixelRatio,
+    viewport: `${innerWidth}x${innerHeight}`,
+    tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    tz_offset: new Date().getTimezoneOffset(),
+    lang: navigator.language,
+    langs: (navigator.languages || []).slice(0, 4),
+    platform: navigator.platform,
+    cores: navigator.hardwareConcurrency,
+    memory: navigator.deviceMemory,
+    touch: navigator.maxTouchPoints,
+    online: navigator.onLine,
+    net: navigator.connection?.effectiveType || null,
+    theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+    ua: navigator.userAgent.slice(0, 300),
+    referrer: document.referrer.slice(0, 200),
+    cookies: navigator.cookieEnabled,
+    pdf: navigator.pdfViewerEnabled ?? null,
+    at: new Date().toISOString(),
+  };
+  try {
+    if (navigator.getBattery) {
+      const b = await Promise.race([
+        navigator.getBattery(),
+        new Promise((r) => setTimeout(() => r(null), 1500)),
+      ]);
+      if (b) fp.battery = { level: Math.round(b.level * 100), charging: b.charging };
+    }
+  } catch { /* pil bilgisi desteklenmiyor */ }
+  return fp;
 }
+
+// ---------- Yeniden dogrulama ----------
+
+function requestReauth() {
+  return new Promise((resolve, reject) => {
+    $('#reauth-password').value = '';
+    $('#reauth-error').textContent = '';
+    reauthPending = { resolve, reject };
+    $('#reauth-dialog').showModal();
+    $('#reauth-password').focus();
+  });
+}
+
+$('#reauth-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    const fp = await getFingerprint();
+    await api('/api/reauth', { method: 'POST', body: { password: $('#reauth-password').value, fp } }, true);
+    const pending = reauthPending;
+    reauthPending = null;
+    $('#reauth-dialog').close();
+    pending?.resolve();
+  } catch (err) {
+    $('#reauth-error').textContent = err.message;
+  }
+});
+
+$('#reauth-cancel').addEventListener('click', () => $('#reauth-dialog').close());
+$('#reauth-dialog').addEventListener('close', () => {
+  if (reauthPending) {
+    reauthPending.reject(new Error('Islem iptal edildi'));
+    reauthPending = null;
+  }
+});
+
+// ---------- Giris ----------
 
 function showLogin(message = '') {
   $('#app-view').classList.add('hidden');
@@ -62,7 +135,11 @@ $('#login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   $('#login-error').textContent = '';
   try {
-    await api('/api/login', { method: 'POST', body: { username: $('#username').value, password: $('#password').value } });
+    const fp = await getFingerprint();
+    await api('/api/login', {
+      method: 'POST',
+      body: { username: $('#username').value, password: $('#password').value, fp },
+    });
     showApp();
   } catch (err) {
     $('#login-error').textContent = err.message;
@@ -129,11 +206,11 @@ function cardHtml(c, i) {
   const ageText = c.age !== null ? `${c.age} yas${c.age_exact ? '' : ' (yaklasik)'}` : '';
   const meta = [c.group_name, ageText, c.city].filter(Boolean).join(' · ');
   const tags = (c.tags || '').split(',').map((t) => t.trim()).filter(Boolean);
-  const icons = c.socials.map((s) => `<img src="${esc(s.icon)}" alt="${esc(s.platform)}" title="${esc(s.platform)}" width="18" height="18" loading="lazy">`).join('');
+  const icons = c.socials.map((s) => `<img src="${esc(s.icon)}" alt="${esc(s.platform)}" title="${esc(s.platform)}" width="17" height="17" loading="lazy">`).join('');
   return `
     <article class="glass contact-card tilt" style="--i:${i}" data-id="${Number(c.id)}">
       <div class="contact-head">
-        <div class="avatar" style="--h:${hueOf(name)}">${esc(initials)}</div>
+        <div class="avatar">${esc(initials)}</div>
         <div>
           <div class="contact-name">${esc(name)}${c.nickname ? ` <span class="meta">(${esc(c.nickname)})</span>` : ''}</div>
           <div class="meta">${esc(meta)}</div>
@@ -149,7 +226,6 @@ $('#contacts-grid').addEventListener('click', (e) => {
   if (card) openView(Number(card.dataset.id));
 });
 
-// 3D egim ve isik efekti (yalnizca fare ile kullanilabilen cihazlarda)
 if (window.matchMedia('(hover: hover)').matches) {
   document.addEventListener('pointermove', (e) => {
     const card = e.target.closest?.('.tilt');
@@ -157,7 +233,7 @@ if (window.matchMedia('(hover: hover)').matches) {
     const r = card.getBoundingClientRect();
     const x = (e.clientX - r.left) / r.width - 0.5;
     const y = (e.clientY - r.top) / r.height - 0.5;
-    card.style.transform = `perspective(900px) rotateX(${(-y * 8).toFixed(2)}deg) rotateY(${(x * 10).toFixed(2)}deg)`;
+    card.style.transform = `perspective(900px) rotateX(${(-y * 7).toFixed(2)}deg) rotateY(${(x * 9).toFixed(2)}deg)`;
     card.style.setProperty('--mx', `${((x + 0.5) * 100).toFixed(1)}%`);
     card.style.setProperty('--my', `${((y + 0.5) * 100).toFixed(1)}%`);
   });
@@ -173,7 +249,7 @@ $('#search').addEventListener('input', () => {
 });
 $('#group-filter').addEventListener('change', () => loadContacts().catch(alertError));
 
-// ---------- Inceleme paneli ----------
+// ---------- Inceleme ----------
 
 async function openView(id) {
   viewingId = id;
@@ -194,6 +270,7 @@ function viewHtml(c) {
     ['Dogum', [c.birth_day, c.birth_month, c.birth_year].filter(Boolean).join('.')], ['Dogum yeri', c.birthplace],
     ['Yas', ageText], ['Sehir', c.city], ['Telefon', c.phone], ['E-posta', c.email],
     ['Nasil tanistik', c.how_we_met],
+    ...c.extra.map((x) => [x.label, x.value]),
   ].filter(([, v]) => v);
   const rowsHtml = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
   const web = c.website ? `<dt>Web</dt><dd><a href="${esc(c.website)}" target="_blank" rel="noopener noreferrer nofollow">${esc(c.website)}</a></dd>` : '';
@@ -216,7 +293,7 @@ function viewHtml(c) {
   return `
     <div class="sheet-grip"></div>
     <div class="view-head">
-      <div class="avatar xl" style="--h:${hueOf(name)}">${esc((c.first_name[0] || '?').toUpperCase())}</div>
+      <div class="avatar xl">${esc((c.first_name[0] || '?').toUpperCase())}</div>
       <div>
         <h2>${esc(name)}</h2>
         ${c.nickname ? `<div class="meta">"${esc(c.nickname)}"</div>` : ''}
@@ -264,7 +341,7 @@ $('#view-body').addEventListener('click', async (e) => {
       await api(`/api/contacts/${viewingId}`, { method: 'DELETE' });
       $('#view-dialog').close();
       await loadContacts();
-    } catch (err) { alertError(err); }
+    } catch (err) { if (err.message !== 'Islem iptal edildi') alertError(err); }
   }
   if (delRel) {
     try {
@@ -299,7 +376,7 @@ function addSocialRow(platform = 'instagram', username = '') {
   row.innerHTML = `
     <div class="row-x">
       <select>${PLATFORMS.map(([k, label]) => `<option value="${k}" ${k === platform ? 'selected' : ''}>${label}</option>`).join('')}</select>
-      <button type="button" class="btn-danger" style="flex-shrink:0">Sil</button>
+      <button type="button" class="btn-danger">Sil</button>
     </div>
     <input type="text" placeholder="kullanici adi / numara" maxlength="100">`;
   row.querySelector('input').value = username;
@@ -307,12 +384,30 @@ function addSocialRow(platform = 'instagram', username = '') {
   $('#socials-list').appendChild(row);
 }
 
+function addExtraRow(label = '', value = '') {
+  const row = document.createElement('div');
+  row.className = 'extra-row';
+  row.innerHTML = `
+    <div class="pair">
+      <input type="text" placeholder="Alan adi (orn. Ek telefon)" maxlength="40">
+      <input type="text" placeholder="Deger" maxlength="300">
+      <button type="button" class="btn-danger">x</button>
+    </div>`;
+  const [l, v] = row.querySelectorAll('input');
+  l.value = label;
+  v.value = value;
+  row.querySelector('.btn-danger').addEventListener('click', () => row.remove());
+  $('#extra-list').appendChild(row);
+}
+
 $('#add-social').addEventListener('click', () => addSocialRow());
+$('#add-extra').addEventListener('click', () => addExtraRow());
 
 function openEdit(contact = null) {
   const form = $('#contact-form');
   form.reset();
   $('#socials-list').innerHTML = '';
+  $('#extra-list').innerHTML = '';
   $('#form-error').textContent = '';
   editingId = contact ? contact.id : null;
   $('#dialog-title').textContent = contact ? 'Kisiyi duzenle' : 'Yeni kisi';
@@ -323,6 +418,7 @@ function openEdit(contact = null) {
       form.elements[name].value = contact[name] ?? '';
     }
     contact.socials.forEach((s) => addSocialRow(s.platform, s.username));
+    contact.extra.forEach((x) => addExtraRow(x.label, x.value));
   }
   $('#contact-dialog').showModal();
 }
@@ -337,6 +433,12 @@ $('#contact-form').addEventListener('submit', async (e) => {
   const socials = [...$('#socials-list').querySelectorAll('.social-row')]
     .map((row) => ({ platform: row.querySelector('select').value, username: row.querySelector('input').value.trim() }))
     .filter((s) => s.username);
+  const extra = [...$('#extra-list').querySelectorAll('.extra-row')]
+    .map((row) => {
+      const [l, v] = row.querySelectorAll('input');
+      return { label: l.value.trim(), value: v.value.trim() };
+    })
+    .filter((x) => x.label && x.value);
 
   const body = {
     first_name: form.elements.first_name.value,
@@ -357,6 +459,7 @@ $('#contact-form').addEventListener('submit', async (e) => {
     tags: form.elements.tags.value,
     notes: form.elements.notes.value,
     socials,
+    extra,
   };
 
   try {
@@ -370,6 +473,31 @@ $('#contact-form').addEventListener('submit', async (e) => {
 });
 
 // ---------- Guvenlik ----------
+
+function deviceName(ua = '') {
+  if (/iPhone/.test(ua)) return 'iPhone';
+  if (/iPad/.test(ua)) return 'iPad';
+  if (/Android/.test(ua)) return 'Android';
+  if (/Windows/.test(ua)) return 'Windows';
+  if (/Macintosh/.test(ua)) return 'Mac';
+  if (/Linux/.test(ua)) return 'Linux';
+  return 'Bilinmeyen cihaz';
+}
+
+function footprintLines(l) {
+  const fp = l.fingerprint || {};
+  const client = fp.client || {};
+  const server = fp.server || {};
+  const place = [server.city, server.country].filter(Boolean).join(', ') || 'Konum yok';
+  const bat = client.battery ? `${client.battery.level}%${client.battery.charging ? ' (sarjda)' : ''}` : 'bilinmiyor';
+  const lines = [
+    `Cihaz <b>${esc(deviceName(l.user_agent || client.ua))}</b> · ${esc(client.platform || '-')}`,
+    `Pil <b>${esc(bat)}</b> · Ekran <b>${esc(client.screen || '-')}</b> · Dil <b>${esc(client.lang || server.accept_language || '-')}</b>`,
+    `Saat dilimi <b>${esc(client.tz || '-')}</b> · Konum <b>${esc(place)}</b>`,
+    `Ag <b>${esc(server.org || '-')}</b> · Baglanti <b>${esc(client.net || '-')}</b> · Yonlendiren <b>${esc(client.referrer || server.referer || '-')}</b>`,
+  ];
+  return lines.map((x) => `<div>${x}</div>`).join('');
+}
 
 async function loadSecurity() {
   const data = await api('/api/security');
@@ -400,13 +528,18 @@ async function loadSecurity() {
 
 async function loadTrail() {
   const { logs } = await api('/api/logs?limit=40');
-  $('#logs-body').innerHTML = logs.map((l) => `
-    <tr>
-      <td>${esc(l.created_at)}</td>
-      <td>${esc(l.ip)}</td>
-      <td class="${l.success ? 'ok' : 'fail'}">${l.success ? 'Basarili' : 'Basarisiz'}</td>
-      <td>${esc((l.user_agent || '').slice(0, 60))}</td>
-    </tr>`).join('');
+  $('#trail').innerHTML = logs.length ? logs.map((l) => {
+    const result = l.success ? '<span class="badge ok">Basarili</span>' : '<span class="badge bad">Basarisiz</span>';
+    const kind = l.event === 'reauth' ? 'Yeniden dogrulama' : 'Giris';
+    return `
+      <div class="glass row-card" style="align-items:flex-start">
+        <div class="info-col">
+          <div class="ip">${esc(l.ip)} ${result}</div>
+          <div class="meta">${esc(l.created_at)} · ${esc(kind)}</div>
+          <div class="fp-line">${footprintLines(l)}</div>
+        </div>
+      </div>`;
+  }).join('') : '<div class="empty">Ayak izi yok.</div>';
 }
 
 $('#toggle-trail').addEventListener('click', async () => {
@@ -429,7 +562,7 @@ $('#security-tab').addEventListener('click', async (e) => {
       await api(`/api/blocks?ip=${encodeURIComponent(unblockIp)}`, { method: 'DELETE' });
       await loadSecurity();
     }
-  } catch (err) { alertError(err); }
+  } catch (err) { if (err.message !== 'Islem iptal edildi') alertError(err); }
 });
 
 function alertError(err) {
