@@ -7,14 +7,17 @@ CREATE TABLE IF NOT EXISTS admin (
 CREATE TABLE IF NOT EXISTS sessions (
   token_hash TEXT PRIMARY KEY,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  expires_at TEXT NOT NULL
+  expires_at TEXT NOT NULL,
+  reauth_until TEXT
 );
 
 CREATE TABLE IF NOT EXISTS login_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   ip TEXT NOT NULL,
   success INTEGER NOT NULL CHECK (success IN (0, 1)),
+  event TEXT NOT NULL DEFAULT 'login',
   user_agent TEXT,
+  fingerprint TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_login_logs_ip_time ON login_logs (ip, created_at);
@@ -22,6 +25,12 @@ CREATE INDEX IF NOT EXISTS idx_login_logs_ip_time ON login_logs (ip, created_at)
 CREATE TABLE IF NOT EXISTS blocked_ips (
   ip TEXT PRIMARY KEY,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS rate_limits (
+  key TEXT PRIMARY KEY,
+  hits INTEGER NOT NULL,
+  window INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS contacts (
@@ -42,6 +51,7 @@ CREATE TABLE IF NOT EXISTS contacts (
   email TEXT,
   website TEXT,
   socials TEXT NOT NULL DEFAULT '[]',
+  extra TEXT DEFAULT '[]',
   notes TEXT,
   tags TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),

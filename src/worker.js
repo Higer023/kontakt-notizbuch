@@ -1,7 +1,9 @@
 const PBKDF2_ITER = 100000;
 const SESSION_HOURS = 8;
+const REAUTH_MINUTES = 5;
 const MAX_FAILS = 5;
 const LOCK_MINUTES = 15;
+const RATE_PER_MINUTE = 120;
 const USER_RE = /^[A-Za-z0-9._-]{1,100}$/;
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/;
 const PHONE_RE = /^[+0-9 ()-]{0,30}$/;
@@ -16,11 +18,7 @@ const SOCIAL = {
   tiktok: { slug: 'tiktok', re: USER_RE, url: (u) => `https://www.tiktok.com/@${u}` },
   youtube: { slug: 'youtube', re: USER_RE, url: (u) => `https://www.youtube.com/@${u}` },
   snapchat: { slug: 'snapchat', re: USER_RE, url: (u) => `https://www.snapchat.com/add/${u}` },
-  whatsapp: {
-    slug: 'whatsapp', re: /^\+?[0-9]{6,15}$/,
-    clean: (u) => u.replace(/\D/g, ''),
-    url: (u) => `https://wa.me/${u}`,
-  },
+  whatsapp: { slug: 'whatsapp', re: /^\+?[0-9]{6,15}$/, clean: (u) => u.replace(/\D/g, ''), url: (u) => `https://wa.me/${u}` },
   telegram: { slug: 'telegram', re: USER_RE, url: (u) => `https://t.me/${u}` },
   pinterest: { slug: 'pinterest', re: USER_RE, url: (u) => `https://www.pinterest.com/${u}` },
   reddit: { slug: 'reddit', re: USER_RE, url: (u) => `https://www.reddit.com/user/${u}` },
@@ -40,6 +38,7 @@ const SECURITY_HEADERS = {
   'Referrer-Policy': 'no-referrer',
   'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+  'Cache-Control': 'no-store',
 };
 
 class HttpError extends Error {
@@ -59,7 +58,7 @@ export default {
       return withSecurityHeaders(await env.ASSETS.fetch(request));
     } catch (err) {
       if (err instanceof HttpError) {
-        return withSecurityHeaders(json({ error: err.message }, err.status));
+        return withSecurityHeaders(json({ error: err.message, code: err.status === 428 ? 'REAUTH' : undefined }, err.status));
       }
       console.error('Unhandled error:', err);
       return withSecurityHeaders(json({ error: 'Sunucu hatasi' }, 500));
@@ -76,19 +75,39 @@ async function handleApi(request, env, url) {
   const method = request.method;
   const ip = clientIp(request);
 
+  // CSRF ve kotu niyetli cross-origin istekler: yalnizca ayni kaynaktan yazma
+  if (method !== 'GET') {
+    const origin = request.headers.get('Origin');
+    if (origin && origin !== url.origin) throw new HttpError(403, 'Istek reddedildi');
+    if (!(request.headers.get('Content-Type') || '').includes('application/json') && method !== 'DELETE') {
+      throw new HttpError(415, 'Gecersiz istek');
+    }
+  }
+
   if (await isBlocked(env, ip)) throw new HttpError(403, 'Bu adres engellendi');
+  await rateLimit(env, ip);
 
   if (pathname === '/api/login' && method === 'POST') return login(request, env, ip);
   if (pathname === '/api/logout' && method === 'POST') return logout(request, env);
 
   const session = await requireSession(request, env);
   if (!session) throw new HttpError(401, 'Yetkisiz');
+  const requireFresh = () => {
+    if (!session.fresh) throw new HttpError(428, 'Bu islem icin sifrenizi tekrar girin');
+  };
 
+  if (pathname === '/api/reauth' && method === 'POST') return reauth(request, env, ip, session);
   if (pathname === '/api/me' && method === 'GET') return json({ ok: true });
   if (pathname === '/api/logs' && method === 'GET') return listLogs(env, url);
   if (pathname === '/api/security' && method === 'GET') return securityOverview(env);
-  if (pathname === '/api/blocks' && method === 'POST') return blockIp(request, env, ip);
-  if (pathname === '/api/blocks' && method === 'DELETE') return unblockIp(env, url);
+  if (pathname === '/api/blocks' && method === 'POST') {
+    requireFresh();
+    return blockIp(request, env, ip);
+  }
+  if (pathname === '/api/blocks' && method === 'DELETE') {
+    requireFresh();
+    return unblockIp(env, url);
+  }
   if (pathname === '/api/contacts' && method === 'GET') return listContacts(env, url);
   if (pathname === '/api/contacts' && method === 'POST') return createContact(request, env);
   if (pathname === '/api/relations' && method === 'POST') return createRelation(request, env);
@@ -98,13 +117,32 @@ async function handleApi(request, env, url) {
     const id = Number(contactMatch[1]);
     if (method === 'GET') return getContact(env, id);
     if (method === 'PUT') return updateContact(request, env, id);
-    if (method === 'DELETE') return deleteContact(env, id);
+    if (method === 'DELETE') {
+      requireFresh();
+      return deleteContact(env, id);
+    }
   }
 
   const relMatch = pathname.match(/^\/api\/relations\/(\d+)$/);
-  if (relMatch && method === 'DELETE') return deleteRelation(env, Number(relMatch[1]));
+  if (relMatch && method === 'DELETE') {
+    requireFresh();
+    return deleteRelation(env, Number(relMatch[1]));
+  }
 
   throw new HttpError(404, 'Bulunamadi');
+}
+
+async function rateLimit(env, ip) {
+  const minute = Math.floor(Date.now() / 60000);
+  const key = `${ip}:${minute}`;
+  await env.DB.prepare(
+    'INSERT INTO rate_limits (key, hits, window) VALUES (?, 1, ?) ON CONFLICT(key) DO UPDATE SET hits = hits + 1'
+  ).bind(key, minute).run();
+  const row = await env.DB.prepare('SELECT hits FROM rate_limits WHERE key = ?').bind(key).first();
+  if (row && row.hits > RATE_PER_MINUTE) throw new HttpError(429, 'Cok fazla istek. Biraz bekleyin.');
+  if (Math.random() < 0.02) {
+    await env.DB.prepare('DELETE FROM rate_limits WHERE window < ?').bind(minute - 5).run();
+  }
 }
 
 async function isBlocked(env, ip) {
@@ -112,40 +150,85 @@ async function isBlocked(env, ip) {
   return !!row;
 }
 
-async function login(request, env, ip) {
-  const ua = (request.headers.get('User-Agent') || '').slice(0, 200);
+// Ayak izi: istemci parmak izi + sunucu tarafi bilgiler (ulke, sehir, dil, yonlendiren)
+function footprintJson(request, clientFp) {
+  const cf = request.cf || {};
+  const server = {
+    country: cf.country || null,
+    city: cf.city || null,
+    region: cf.region || null,
+    asn: cf.asn || null,
+    org: cf.asOrganization || null,
+    colo: cf.colo || null,
+    accept_language: (request.headers.get('Accept-Language') || '').slice(0, 120) || null,
+    referer: (request.headers.get('Referer') || '').slice(0, 200) || null,
+    tls: cf.tlsVersion || null,
+  };
+  let client = null;
+  if (clientFp && typeof clientFp === 'object') {
+    client = JSON.stringify(clientFp).slice(0, 3000);
+    client = JSON.parse(client);
+  }
+  return JSON.stringify({ client, server }).slice(0, 6000);
+}
 
-  const recent = await env.DB.prepare(
+async function recordFootprint(env, request, ip, event, success, clientFp) {
+  const ua = (request.headers.get('User-Agent') || '').slice(0, 300);
+  await env.DB.prepare(
+    'INSERT INTO login_logs (ip, success, event, user_agent, fingerprint) VALUES (?, ?, ?, ?, ?)'
+  ).bind(ip, success ? 1 : 0, event, ua, footprintJson(request, clientFp)).run();
+}
+
+async function recentFailCount(env, ip) {
+  const row = await env.DB.prepare(
     "SELECT COUNT(*) AS n FROM login_logs WHERE ip = ? AND success = 0 AND created_at > datetime('now', ?)"
   ).bind(ip, `-${LOCK_MINUTES} minutes`).first();
+  return row.n;
+}
 
-  if (recent.n >= MAX_FAILS) {
+async function verifyAdminPassword(env, username, password) {
+  const admin = await env.DB.prepare('SELECT username, password_hash FROM admin WHERE id = 1').first();
+  if (!admin) return false;
+  if (password.length === 0 || password.length > 1024) return false;
+  const userOk = username === null || timingSafeEqualStr(username, admin.username);
+  const passOk = await verifyPassword(password, admin.password_hash);
+  return userOk && passOk;
+}
+
+async function login(request, env, ip) {
+  if ((await recentFailCount(env, ip)) >= MAX_FAILS) {
     throw new HttpError(429, 'Cok fazla hatali deneme. Lutfen daha sonra tekrar deneyin.');
   }
 
   const body = await readJson(request);
-  const username = typeof body.username === 'string' ? body.username.trim() : '';
+  const username = typeof body.username === 'string' ? body.username.trim().slice(0, 100) : '';
   const password = typeof body.password === 'string' ? body.password : '';
-  const admin = await env.DB.prepare('SELECT username, password_hash FROM admin WHERE id = 1').first();
+  const ok = username.length > 0 && (await verifyAdminPassword(env, username, password));
 
-  const ok =
-    !!admin &&
-    username.length > 0 && username.length <= 100 &&
-    password.length > 0 && password.length <= 1024 &&
-    timingSafeEqualStr(username, admin.username) &&
-    (await verifyPassword(password, admin.password_hash));
-
-  await env.DB.prepare('INSERT INTO login_logs (ip, success, user_agent) VALUES (?, ?, ?)')
-    .bind(ip, ok ? 1 : 0, ua).run();
-
+  await recordFootprint(env, request, ip, 'login', ok, body.fp);
   if (!ok) throw new HttpError(401, 'Kullanici adi veya sifre hatali');
 
   await env.DB.prepare("DELETE FROM sessions WHERE expires_at < datetime('now')").run();
   const token = randomToken();
-  await env.DB.prepare("INSERT INTO sessions (token_hash, expires_at) VALUES (?, datetime('now', ?))")
-    .bind(await sha256(token), `+${SESSION_HOURS} hours`).run();
+  await env.DB.prepare(
+    "INSERT INTO sessions (token_hash, expires_at, reauth_until) VALUES (?, datetime('now', ?), datetime('now', ?))"
+  ).bind(await sha256(token), `+${SESSION_HOURS} hours`, `+${REAUTH_MINUTES} minutes`).run();
 
   return json({ ok: true }, 200, { 'Set-Cookie': sessionCookie(token, SESSION_HOURS * 3600) });
+}
+
+async function reauth(request, env, ip, session) {
+  if ((await recentFailCount(env, ip)) >= MAX_FAILS) {
+    throw new HttpError(429, 'Cok fazla hatali deneme. Lutfen daha sonra tekrar deneyin.');
+  }
+  const body = await readJson(request);
+  const password = typeof body.password === 'string' ? body.password : '';
+  const ok = await verifyAdminPassword(env, null, password);
+  await recordFootprint(env, request, ip, 'reauth', ok, body.fp);
+  if (!ok) throw new HttpError(401, 'Sifre hatali');
+  await env.DB.prepare("UPDATE sessions SET reauth_until = datetime('now', ?) WHERE token_hash = ?")
+    .bind(`+${REAUTH_MINUTES} minutes`, session.token_hash).run();
+  return json({ ok: true });
 }
 
 async function logout(request, env) {
@@ -159,19 +242,31 @@ async function logout(request, env) {
 async function requireSession(request, env) {
   const token = getCookie(request, 'session');
   if (!token) return null;
-  return env.DB.prepare(
-    "SELECT token_hash FROM sessions WHERE token_hash = ? AND expires_at > datetime('now')"
+  const row = await env.DB.prepare(
+    "SELECT token_hash, (reauth_until IS NOT NULL AND reauth_until > datetime('now')) AS fresh FROM sessions WHERE token_hash = ? AND expires_at > datetime('now')"
   ).bind(await sha256(token)).first();
+  if (!row) return null;
+  return { token_hash: row.token_hash, fresh: !!row.fresh };
 }
 
 // ---------- Guvenlik ----------
 
+function parseJsonSafe(text) {
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function listLogs(env, url) {
-  const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 30, 1), 200);
+  const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 40, 1), 200);
   const { results } = await env.DB.prepare(
-    'SELECT id, ip, success, user_agent, created_at FROM login_logs ORDER BY id DESC LIMIT ?'
+    'SELECT id, ip, success, event, user_agent, fingerprint, created_at FROM login_logs ORDER BY id DESC LIMIT ?'
   ).bind(limit).all();
-  return json({ logs: results });
+  return json({
+    logs: results.map((r) => ({ ...r, fingerprint: parseJsonSafe(r.fingerprint) })),
+  });
 }
 
 async function securityOverview(env) {
@@ -211,7 +306,7 @@ async function unblockIp(env, url) {
   return json({ ok: true });
 }
 
-// ---------- Kimlik dogrulama yardimcilari ----------
+// ---------- Sifre ----------
 
 async function verifyPassword(password, stored) {
   const [scheme, iterStr, saltB64, hashB64] = stored.split('$');
@@ -289,8 +384,8 @@ async function createContact(request, env) {
   const data = sanitizeContact(await readJson(request));
   const row = await env.DB.prepare(
     `INSERT INTO contacts (first_name, last_name, nickname, birth_year, birth_month, birth_day, birthplace, city,
-       school, group_name, occupation, how_we_met, phone, email, website, socials, notes, tags)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`
+       school, group_name, occupation, how_we_met, phone, email, website, socials, extra, notes, tags)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`
   ).bind(...contactValues(data)).first();
   return json({ contact: formatContact(row) }, 201);
 }
@@ -301,7 +396,7 @@ async function updateContact(request, env, id) {
   const row = await env.DB.prepare(
     `UPDATE contacts SET first_name = ?, last_name = ?, nickname = ?, birth_year = ?, birth_month = ?, birth_day = ?,
        birthplace = ?, city = ?, school = ?, group_name = ?, occupation = ?, how_we_met = ?, phone = ?, email = ?,
-       website = ?, socials = ?, notes = ?, tags = ?, updated_at = datetime('now')
+       website = ?, socials = ?, extra = ?, notes = ?, tags = ?, updated_at = datetime('now')
      WHERE id = ? RETURNING *`
   ).bind(...contactValues(data), id).first();
   return json({ contact: formatContact(row) });
@@ -394,6 +489,16 @@ function sanitizeContact(input) {
     }
   }
 
+  // Ozel alanlar: serbest etiket + deger (ek telefon, ozel tarih, not vb.)
+  const extra = [];
+  if (Array.isArray(input.extra)) {
+    for (const x of input.extra.slice(0, 25)) {
+      const label = typeof x?.label === 'string' ? x.label.trim().slice(0, 40) : '';
+      const value = typeof x?.value === 'string' ? x.value.trim().slice(0, 300) : '';
+      if (label && value) extra.push({ label, value });
+    }
+  }
+
   return {
     first_name: firstName,
     last_name: str(input.last_name, 100),
@@ -411,6 +516,7 @@ function sanitizeContact(input) {
     email,
     website,
     socials,
+    extra,
     notes: str(input.notes, 5000),
     tags: str(input.tags, 300),
   };
@@ -420,7 +526,7 @@ function contactValues(d) {
   return [
     d.first_name, d.last_name, d.nickname, d.birth_year, d.birth_month, d.birth_day, d.birthplace, d.city,
     d.school, d.group_name, d.occupation, d.how_we_met, d.phone, d.email, d.website,
-    JSON.stringify(d.socials), d.notes, d.tags,
+    JSON.stringify(d.socials), JSON.stringify(d.extra), d.notes, d.tags,
   ];
 }
 
@@ -454,6 +560,7 @@ function formatContact(row) {
     email: row.email,
     website: row.website,
     socials,
+    extra: parseJsonSafe(row.extra) || [],
     notes: row.notes,
     tags: row.tags,
     created_at: row.created_at,
