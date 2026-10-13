@@ -1,0 +1,16 @@
+name = "kontakt-notizbuch"
+main = "src/worker.js"
+compatibility_date = "2025-01-01"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "kontakt-db"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+[[r2_buckets]]
+binding = "PHOTOS"
+bucket_name = "kontakt-photos"
