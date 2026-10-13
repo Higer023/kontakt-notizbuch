@@ -9,4 +9,4 @@ binding = "ASSETS"
 [[d1_databases]]
 binding = "DB"
 database_name = "kontakt-db"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "22e8e90b-c31d-4a22-bdf1-4caa3c4f76fe"
