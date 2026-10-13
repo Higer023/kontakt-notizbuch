@@ -67,18 +67,28 @@ export default {
   },
 };
 
+function clientIp(request) {
+  return request.headers.get('CF-Connecting-IP') || 'unknown';
+}
+
 async function handleApi(request, env, url) {
   const { pathname } = url;
   const method = request.method;
+  const ip = clientIp(request);
 
-  if (pathname === '/api/login' && method === 'POST') return login(request, env);
+  if (await isBlocked(env, ip)) throw new HttpError(403, 'Bu adres engellendi');
+
+  if (pathname === '/api/login' && method === 'POST') return login(request, env, ip);
   if (pathname === '/api/logout' && method === 'POST') return logout(request, env);
 
   const session = await requireSession(request, env);
   if (!session) throw new HttpError(401, 'Yetkisiz');
 
   if (pathname === '/api/me' && method === 'GET') return json({ ok: true });
-  if (pathname === '/api/logs' && method === 'GET') return listLogs(env);
+  if (pathname === '/api/logs' && method === 'GET') return listLogs(env, url);
+  if (pathname === '/api/security' && method === 'GET') return securityOverview(env);
+  if (pathname === '/api/blocks' && method === 'POST') return blockIp(request, env, ip);
+  if (pathname === '/api/blocks' && method === 'DELETE') return unblockIp(env, url);
   if (pathname === '/api/contacts' && method === 'GET') return listContacts(env, url);
   if (pathname === '/api/contacts' && method === 'POST') return createContact(request, env);
   if (pathname === '/api/relations' && method === 'POST') return createRelation(request, env);
@@ -97,8 +107,12 @@ async function handleApi(request, env, url) {
   throw new HttpError(404, 'Bulunamadi');
 }
 
-async function login(request, env) {
-  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+async function isBlocked(env, ip) {
+  const row = await env.DB.prepare('SELECT ip FROM blocked_ips WHERE ip = ?').bind(ip).first();
+  return !!row;
+}
+
+async function login(request, env, ip) {
   const ua = (request.headers.get('User-Agent') || '').slice(0, 200);
 
   const recent = await env.DB.prepare(
@@ -150,6 +164,55 @@ async function requireSession(request, env) {
   ).bind(await sha256(token)).first();
 }
 
+// ---------- Guvenlik ----------
+
+async function listLogs(env, url) {
+  const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 30, 1), 200);
+  const { results } = await env.DB.prepare(
+    'SELECT id, ip, success, user_agent, created_at FROM login_logs ORDER BY id DESC LIMIT ?'
+  ).bind(limit).all();
+  return json({ logs: results });
+}
+
+async function securityOverview(env) {
+  const { results: ips } = await env.DB.prepare(
+    `SELECT l.ip, COUNT(*) AS total,
+            SUM(CASE WHEN l.success = 0 THEN 1 ELSE 0 END) AS fails,
+            MAX(l.created_at) AS last_at,
+            (SELECT 1 FROM blocked_ips b WHERE b.ip = l.ip) AS blocked
+     FROM login_logs l GROUP BY l.ip ORDER BY last_at DESC LIMIT 100`
+  ).all();
+  const { results: blocked } = await env.DB.prepare(
+    'SELECT ip, created_at FROM blocked_ips ORDER BY created_at DESC'
+  ).all();
+  const totals = await env.DB.prepare(
+    'SELECT COUNT(*) AS total, SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) AS fails FROM login_logs'
+  ).first();
+  return json({
+    ips: ips.map((r) => ({ ...r, blocked: !!r.blocked })),
+    blocked,
+    totals: { total: totals.total || 0, fails: totals.fails || 0, blocked: blocked.length },
+  });
+}
+
+async function blockIp(request, env, ownIp) {
+  const body = await readJson(request);
+  const ip = typeof body.ip === 'string' ? body.ip.trim() : '';
+  if (!ip || ip.length > 64) throw new HttpError(400, 'Gecersiz IP adresi');
+  if (ip === ownIp) throw new HttpError(400, 'Kendi IP adresinizi engelleyemezsiniz');
+  await env.DB.prepare('INSERT OR IGNORE INTO blocked_ips (ip) VALUES (?)').bind(ip).run();
+  return json({ ok: true }, 201);
+}
+
+async function unblockIp(env, url) {
+  const ip = (url.searchParams.get('ip') || '').trim();
+  if (!ip) throw new HttpError(400, 'IP gerekli');
+  await env.DB.prepare('DELETE FROM blocked_ips WHERE ip = ?').bind(ip).run();
+  return json({ ok: true });
+}
+
+// ---------- Kimlik dogrulama yardimcilari ----------
+
 async function verifyPassword(password, stored) {
   const [scheme, iterStr, saltB64, hashB64] = stored.split('$');
   if (scheme !== 'pbkdf2') return false;
@@ -176,12 +239,7 @@ function timingSafeEqualStr(a, b) {
   return diff === 0;
 }
 
-async function listLogs(env) {
-  const { results } = await env.DB.prepare(
-    'SELECT ip, success, user_agent, created_at FROM login_logs ORDER BY id DESC LIMIT 200'
-  ).all();
-  return json({ logs: results });
-}
+// ---------- Kisiler ----------
 
 async function listContacts(env, url) {
   const q = (url.searchParams.get('q') || '').trim().slice(0, 100);
@@ -414,6 +472,8 @@ function computeAge(row) {
   }
   return age;
 }
+
+// ---------- Yardimcilar ----------
 
 async function readJson(request) {
   if (!(request.headers.get('Content-Type') || '').includes('application/json')) {
