@@ -7,9 +7,10 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+  <div class="bg-scene" aria-hidden="true"><span class="orb o1"></span><span class="orb o2"></span><span class="orb o3"></span></div>
 
   <section id="login-view" class="center-screen hidden">
-    <form id="login-form" class="card narrow">
+    <form id="login-form" class="glass card narrow tilt">
       <h1>Giris</h1>
       <input type="text" id="username" placeholder="Kullanici adi" autocomplete="username" required>
       <input type="password" id="password" placeholder="Sifre" autocomplete="current-password" required>
@@ -19,7 +20,7 @@
   </section>
 
   <section id="app-view" class="hidden">
-    <header class="topbar">
+    <header class="topbar glass">
       <h1>Not Defteri</h1>
       <nav>
         <button class="btn tab active" data-tab="contacts">Kisiler</button>
@@ -31,14 +32,15 @@
     <main>
       <div id="contacts-tab">
         <div class="toolbar">
-          <input type="search" id="search" placeholder="Isim, sehir, etiket ara...">
+          <input type="search" id="search" placeholder="Isim, sehir, okul, grup, etiket ara...">
+          <select id="group-filter"><option value="">Tum gruplar</option></select>
           <button id="add-btn" class="btn primary">+ Kisi ekle</button>
         </div>
         <div id="contacts-grid" class="grid"></div>
       </div>
 
       <div id="logs-tab" class="hidden">
-        <div class="table-wrap">
+        <div class="table-wrap glass">
           <table>
             <thead><tr><th>Tarih</th><th>IP</th><th>Sonuc</th><th>Tarayici</th></tr></thead>
             <tbody id="logs-body"></tbody>
@@ -48,20 +50,56 @@
     </main>
   </section>
 
-  <dialog id="contact-dialog">
+  <!-- Inceleme paneli -->
+  <dialog id="view-dialog" class="glass-dialog">
+    <div id="view-body"></div>
+  </dialog>
+
+  <!-- Ekleme / duzenleme formu -->
+  <dialog id="contact-dialog" class="glass-dialog">
     <form id="contact-form" method="dialog" class="form-grid">
       <h2 id="dialog-title">Yeni kisi</h2>
 
-      <label>Isim *<input name="first_name" required maxlength="100"></label>
-      <label>Soyisim<input name="last_name" maxlength="100"></label>
+      <fieldset class="full">
+        <legend>Kimlik</legend>
+        <div class="row2">
+          <label>Isim *<input name="first_name" required maxlength="100"></label>
+          <label>Soyisim<input name="last_name" maxlength="100"></label>
+        </div>
+        <label>Takma ad / lakap<input name="nickname" maxlength="60"></label>
+      </fieldset>
 
-      <label>Dogum yili<input name="birth_year" type="number" min="1900" placeholder="Orn. 2006"></label>
-      <label>Dogum ayi<input name="birth_month" type="number" min="1" max="12"></label>
-      <label>Dogum gunu<input name="birth_day" type="number" min="1" max="31"></label>
+      <fieldset class="full">
+        <legend>Dogum</legend>
+        <div class="row3">
+          <label>Yil<input name="birth_year" type="number" min="1900" placeholder="2006"></label>
+          <label>Ay<input name="birth_month" type="number" min="1" max="12"></label>
+          <label>Gun<input name="birth_day" type="number" min="1" max="31"></label>
+        </div>
+        <label>Dogum yeri<input name="birthplace" maxlength="100"></label>
+      </fieldset>
 
-      <label>Sehir / Konum<input name="city" maxlength="100"></label>
-      <label>Telefon<input name="phone" type="tel" maxlength="30"></label>
-      <label class="full">E-posta<input name="email" type="email" maxlength="254"></label>
+      <fieldset class="full">
+        <legend>Yasam ve okul</legend>
+        <div class="row2">
+          <label>Sehir / konum<input name="city" maxlength="100"></label>
+          <label>Grup / sinif<input name="group_name" maxlength="60" placeholder="Sinif 8/LF"></label>
+        </div>
+        <div class="row2">
+          <label>Okul<input name="school" maxlength="120"></label>
+          <label>Meslek<input name="occupation" maxlength="100"></label>
+        </div>
+        <label>Nasil tanistik?<textarea name="how_we_met" rows="2" maxlength="500"></textarea></label>
+      </fieldset>
+
+      <fieldset class="full">
+        <legend>Iletisim</legend>
+        <div class="row2">
+          <label>Telefon<input name="phone" type="tel" maxlength="30"></label>
+          <label>E-posta<input name="email" type="email" maxlength="254"></label>
+        </div>
+        <label>Web sitesi<input name="website" type="url" maxlength="300" placeholder="https://..."></label>
+      </fieldset>
 
       <fieldset class="full" id="socials-fieldset">
         <legend>Sosyal medya</legend>
@@ -70,7 +108,7 @@
       </fieldset>
 
       <label class="full">Etiketler<input name="tags" maxlength="300" placeholder="aile, is, spor"></label>
-      <label class="full">Notlar<textarea name="notes" rows="4" maxlength="5000"></textarea></label>
+      <label class="full">Notlar<textarea name="notes" rows="3" maxlength="5000"></textarea></label>
 
       <p id="form-error" class="error full" role="alert"></p>
       <div class="full actions">
