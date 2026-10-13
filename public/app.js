@@ -4,17 +4,13 @@ const PLATFORMS = [
   ['whatsapp', 'WhatsApp (telefon)'], ['telegram', 'Telegram'], ['pinterest', 'Pinterest'],
   ['reddit', 'Reddit'], ['twitch', 'Twitch'], ['threads', 'Threads'], ['bluesky', 'Bluesky'], ['medium', 'Medium'],
 ];
-const PLATFORM_SLUG = {
-  instagram: 'instagram', x: 'x', linkedin: 'linkedin', facebook: 'facebook', github: 'github', tiktok: 'tiktok',
-  youtube: 'youtube', snapchat: 'snapchat', whatsapp: 'whatsapp', telegram: 'telegram', pinterest: 'pinterest',
-  reddit: 'reddit', twitch: 'twitch', threads: 'threads', bluesky: 'bluesky', medium: 'medium',
-};
 const $ = (sel) => document.querySelector(sel);
 
 let contacts = [];
 let editingId = null;
 let viewingId = null;
 let searchTimer = null;
+let trailOpen = false;
 
 function esc(value) {
   const d = document.createElement('div');
@@ -48,10 +44,11 @@ function fullName(c) {
   return [c.first_name, c.last_name].filter(Boolean).join(' ');
 }
 
-function showLogin() {
+function showLogin(message = '') {
   $('#app-view').classList.add('hidden');
   $('#login-view').classList.remove('hidden');
   $('#password').value = '';
+  $('#login-error').textContent = message;
   $('#username').focus();
 }
 
@@ -77,16 +74,23 @@ $('#logout-btn').addEventListener('click', async () => {
   showLogin();
 });
 
+// ---------- Sekmeler ----------
+
 document.querySelectorAll('.tab').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach((b) => b.classList.remove('active'));
-    btn.classList.add('active');
-    const tab = btn.dataset.tab;
-    $('#contacts-tab').classList.toggle('hidden', tab !== 'contacts');
-    $('#logs-tab').classList.toggle('hidden', tab !== 'logs');
-    if (tab === 'logs') loadLogs().catch(alertError);
-  });
+  btn.addEventListener('click', () => switchTab(btn.dataset.tab));
 });
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+  $('#contacts-tab').classList.toggle('hidden', tab !== 'contacts');
+  $('#security-tab').classList.toggle('hidden', tab !== 'security');
+  $('#add-btn').classList.toggle('hidden', tab !== 'contacts');
+  $('#page-title').textContent = tab === 'contacts' ? 'Kisiler' : 'Guvenlik';
+  if (tab === 'security') loadSecurity().catch(alertError);
+  window.scrollTo({ top: 0 });
+}
+
+// ---------- Kisiler ----------
 
 async function loadContacts() {
   const q = $('#search').value.trim();
@@ -113,7 +117,7 @@ function renderGroups() {
 function renderGrid() {
   const grid = $('#contacts-grid');
   if (!contacts.length) {
-    grid.innerHTML = '<p class="meta">Henuz kisi yok.</p>';
+    grid.innerHTML = '<div class="glass empty" style="border-radius:24px">Henuz kisi yok. + ile ekleyin.</div>';
     return;
   }
   grid.innerHTML = contacts.map((c, i) => cardHtml(c, i)).join('');
@@ -123,11 +127,11 @@ function cardHtml(c, i) {
   const name = fullName(c) || c.first_name;
   const initials = (c.first_name[0] || '?').toUpperCase();
   const ageText = c.age !== null ? `${c.age} yas${c.age_exact ? '' : ' (yaklasik)'}` : '';
-  const meta = [c.group_name, ageText, c.city].filter(Boolean).join(' - ');
+  const meta = [c.group_name, ageText, c.city].filter(Boolean).join(' · ');
   const tags = (c.tags || '').split(',').map((t) => t.trim()).filter(Boolean);
-  const icons = c.socials.map((s) => `<img src="${esc(s.icon)}" alt="" title="${esc(s.platform)}" width="16" height="16" loading="lazy">`).join('');
+  const icons = c.socials.map((s) => `<img src="${esc(s.icon)}" alt="${esc(s.platform)}" title="${esc(s.platform)}" width="18" height="18" loading="lazy">`).join('');
   return `
-    <article class="contact-card tilt" style="--i:${i}" data-id="${Number(c.id)}">
+    <article class="glass contact-card tilt" style="--i:${i}" data-id="${Number(c.id)}">
       <div class="contact-head">
         <div class="avatar" style="--h:${hueOf(name)}">${esc(initials)}</div>
         <div>
@@ -145,21 +149,23 @@ $('#contacts-grid').addEventListener('click', (e) => {
   if (card) openView(Number(card.dataset.id));
 });
 
-// 3D egim ve isik efekti
-document.addEventListener('pointermove', (e) => {
-  const card = e.target.closest?.('.tilt');
-  if (!card) return;
-  const r = card.getBoundingClientRect();
-  const x = (e.clientX - r.left) / r.width - 0.5;
-  const y = (e.clientY - r.top) / r.height - 0.5;
-  card.style.transform = `perspective(900px) rotateX(${(-y * 10).toFixed(2)}deg) rotateY(${(x * 12).toFixed(2)}deg)`;
-  card.style.setProperty('--mx', `${((x + 0.5) * 100).toFixed(1)}%`);
-  card.style.setProperty('--my', `${((y + 0.5) * 100).toFixed(1)}%`);
-});
-document.addEventListener('pointerout', (e) => {
-  const card = e.target.closest?.('.tilt');
-  if (card && !card.contains(e.relatedTarget)) card.style.transform = '';
-});
+// 3D egim ve isik efekti (yalnizca fare ile kullanilabilen cihazlarda)
+if (window.matchMedia('(hover: hover)').matches) {
+  document.addEventListener('pointermove', (e) => {
+    const card = e.target.closest?.('.tilt');
+    if (!card) return;
+    const r = card.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width - 0.5;
+    const y = (e.clientY - r.top) / r.height - 0.5;
+    card.style.transform = `perspective(900px) rotateX(${(-y * 8).toFixed(2)}deg) rotateY(${(x * 10).toFixed(2)}deg)`;
+    card.style.setProperty('--mx', `${((x + 0.5) * 100).toFixed(1)}%`);
+    card.style.setProperty('--my', `${((y + 0.5) * 100).toFixed(1)}%`);
+  });
+  document.addEventListener('pointerout', (e) => {
+    const card = e.target.closest?.('.tilt');
+    if (card && !card.contains(e.relatedTarget)) card.style.transform = '';
+  });
+}
 
 $('#search').addEventListener('input', () => {
   clearTimeout(searchTimer);
@@ -201,13 +207,14 @@ function viewHtml(c) {
   const relList = c.relations.length
     ? c.relations.map((r) => `
         <li>
-          <span><span class="rel-role">${esc(r.role)}</span>: ${esc(r.other_name)}</span>
-          <button class="btn small danger" data-del-rel="${Number(r.id)}">Kaldir</button>
+          <span><span class="rel-role">${esc(r.role)}</span> · ${esc(r.other_name)}</span>
+          <button class="btn-danger" data-del-rel="${Number(r.id)}">Kaldir</button>
         </li>`).join('')
     : '<li class="meta">Henuz iliski eklenmedi.</li>';
   const options = others.map((o) => `<option value="${Number(o.id)}">${esc(fullName(o))}</option>`).join('');
 
   return `
+    <div class="sheet-grip"></div>
     <div class="view-head">
       <div class="avatar xl" style="--h:${hueOf(name)}">${esc((c.first_name[0] || '?').toUpperCase())}</div>
       <div>
@@ -229,14 +236,14 @@ function viewHtml(c) {
         <label>Kisi<select id="rel-target" required>${options}</select></label>
         <label>Bu kisi, ${esc(name)}'in ne?<input id="rel-label" maxlength="60" placeholder="annesi, crush" required></label>
         <label>${esc(name)}, onun ne?<input id="rel-reverse" maxlength="60" placeholder="cocugu, crush"></label>
-        <button class="btn primary" type="submit">Ekle</button>
+        <button class="btn-primary" type="submit">Iliski ekle</button>
       </form>` : '<p class="meta">Iliski kurmak icin once baska kisi ekleyin.</p>'}
     </div>
 
     <div class="view-actions">
-      <button class="btn ghost" data-act="close">Kapat</button>
-      <button class="btn danger" data-act="delete">Sil</button>
-      <button class="btn primary" data-act="edit">Duzenle</button>
+      <button class="btn-ghost" data-act="close">Kapat</button>
+      <button class="btn-danger" data-act="delete">Sil</button>
+      <button class="btn-primary" data-act="edit">Duzenle</button>
     </div>`;
 }
 
@@ -246,8 +253,10 @@ $('#view-body').addEventListener('click', async (e) => {
   if (act === 'close') $('#view-dialog').close();
   if (act === 'edit') {
     $('#view-dialog').close();
-    const { contact } = await api(`/api/contacts/${viewingId}`).catch(alertError) || {};
-    if (contact) openEdit(contact);
+    try {
+      const { contact } = await api(`/api/contacts/${viewingId}`);
+      openEdit(contact);
+    } catch (err) { alertError(err); }
   }
   if (act === 'delete') {
     if (!confirm('Bu kisi ve tum iliskileri silinsin mi?')) return;
@@ -288,11 +297,13 @@ function addSocialRow(platform = 'instagram', username = '') {
   const row = document.createElement('div');
   row.className = 'social-row';
   row.innerHTML = `
-    <select>${PLATFORMS.map(([k, label]) => `<option value="${k}" ${k === platform ? 'selected' : ''}>${label}</option>`).join('')}</select>
-    <input type="text" placeholder="kullanici adi / numara" maxlength="100">
-    <button type="button" class="btn small ghost">x</button>`;
+    <div class="row-x">
+      <select>${PLATFORMS.map(([k, label]) => `<option value="${k}" ${k === platform ? 'selected' : ''}>${label}</option>`).join('')}</select>
+      <button type="button" class="btn-danger" style="flex-shrink:0">Sil</button>
+    </div>
+    <input type="text" placeholder="kullanici adi / numara" maxlength="100">`;
   row.querySelector('input').value = username;
-  row.querySelector('button').addEventListener('click', () => row.remove());
+  row.querySelector('.btn-danger').addEventListener('click', () => row.remove());
   $('#socials-list').appendChild(row);
 }
 
@@ -358,18 +369,68 @@ $('#contact-form').addEventListener('submit', async (e) => {
   }
 });
 
-// ---------- Loglar ----------
+// ---------- Guvenlik ----------
 
-async function loadLogs() {
-  const { logs } = await api('/api/logs');
+async function loadSecurity() {
+  const data = await api('/api/security');
+  $('#stat-total').textContent = data.totals.total;
+  $('#stat-fail').textContent = data.totals.fails;
+  $('#stat-blocked').textContent = data.totals.blocked;
+
+  $('#ip-list').innerHTML = data.ips.length ? data.ips.map((r) => `
+    <div class="glass row-card">
+      <div class="info-col">
+        <div class="ip">${esc(r.ip)}${r.blocked ? '<span class="badge block">Engelli</span>' : ''}</div>
+        <div class="meta">${Number(r.total)} deneme · ${Number(r.fails)} basarisiz · ${esc(r.last_at)}</div>
+      </div>
+      ${r.blocked ? '' : `<button class="btn-danger" data-block="${esc(r.ip)}">Engelle</button>`}
+    </div>`).join('') : '<div class="empty">Kayit yok.</div>';
+
+  $('#blocked-list').innerHTML = data.blocked.length ? data.blocked.map((b) => `
+    <div class="glass row-card">
+      <div class="info-col">
+        <div class="ip">${esc(b.ip)}</div>
+        <div class="meta">${esc(b.created_at)} tarihinde engellendi</div>
+      </div>
+      <button class="pill glass small" data-unblock="${esc(b.ip)}">Engeli kaldir</button>
+    </div>`).join('') : '<div class="empty">Engellenen adres yok.</div>';
+
+  if (trailOpen) await loadTrail();
+}
+
+async function loadTrail() {
+  const { logs } = await api('/api/logs?limit=40');
   $('#logs-body').innerHTML = logs.map((l) => `
     <tr>
       <td>${esc(l.created_at)}</td>
       <td>${esc(l.ip)}</td>
       <td class="${l.success ? 'ok' : 'fail'}">${l.success ? 'Basarili' : 'Basarisiz'}</td>
-      <td>${esc((l.user_agent || '').slice(0, 80))}</td>
+      <td>${esc((l.user_agent || '').slice(0, 60))}</td>
     </tr>`).join('');
 }
+
+$('#toggle-trail').addEventListener('click', async () => {
+  trailOpen = !trailOpen;
+  $('#trail').classList.toggle('hidden', !trailOpen);
+  $('#toggle-trail').textContent = trailOpen ? 'Kapat' : 'Ayrintili goster';
+  if (trailOpen) await loadTrail().catch(alertError);
+});
+
+$('#security-tab').addEventListener('click', async (e) => {
+  const blockIp = e.target.closest('[data-block]')?.dataset.block;
+  const unblockIp = e.target.closest('[data-unblock]')?.dataset.unblock;
+  try {
+    if (blockIp) {
+      if (!confirm(`${blockIp} adresi engellensin mi?`)) return;
+      await api('/api/blocks', { method: 'POST', body: { ip: blockIp } });
+      await loadSecurity();
+    }
+    if (unblockIp) {
+      await api(`/api/blocks?ip=${encodeURIComponent(unblockIp)}`, { method: 'DELETE' });
+      await loadSecurity();
+    }
+  } catch (err) { alertError(err); }
+});
 
 function alertError(err) {
   alert(err?.message || 'Bir hata olustu');
