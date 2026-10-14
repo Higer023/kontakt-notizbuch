@@ -140,7 +140,7 @@ globalThis.fetch = async (url, opts = {}) => {
 new Function(fs.readFileSync(path.join(ROOT, 'public', 'crypto.js'), 'utf8'))();
 globalThis.Vault = globalThis.window.Vault;
 const A = new Function(fs.readFileSync(path.join(ROOT, 'public', 'app.js'), 'utf8') + `
-return { records, buildViews, unlockVault, persist, deleteContactById, addRelations, removeRelation, validate, computeAge, legacyToData, cardHtml, viewHtml, openEdit };`)();
+return { records, buildViews, unlockVault, persist, deleteContactById, addRelations, removeRelation, validate, computeAge, legacyToData, cardHtml, viewHtml, openEdit, statsHtml, graphSvg, applyTheme, ringLayout };`)();
 await new Promise((r) => setTimeout(r, 1500)); // acilis (api /api/me) bitsin
 
 console.log('--- Istemci + sunucu testleri ---');
@@ -216,6 +216,46 @@ await check('kart ve detay render hata vermez', async () => {
   const v = A.buildViews();
   for (const c of v) { const h = A.cardHtml(c, 0); ok(typeof h !== 'undefined'); const d = A.viewHtml(c); ok(typeof d !== 'undefined'); }
   A.openEdit(v[0]);
+});
+await check('ozet: kisi sayisi ve grup', async () => {
+  const h = A.statsHtml(A.buildViews());
+  ok(h.includes('<b>3</b>'), 'kisi sayisi 3 degil');
+  ok(h.includes('Son eklenenler'), 'son eklenenler yok');
+});
+await check('iliski agi: yalnizca iliskili kisiler, her iliski bir kez', async () => {
+  const svg = A.graphSvg(A.buildViews());
+  ok(svg && svg.startsWith('<svg'), 'svg uretilmedi');
+  eq((svg.match(/class="node"/g) || []).length, 2, 'dugum sayisi');
+  eq((svg.match(/class="edge"/g) || []).length, 1, 'kenar sayisi');
+});
+await check('iliski yoksa grafik uretilmez', async () => {
+  eq(A.graphSvg(A.buildViews().map((c) => ({ ...c, relations: [] }))), null);
+});
+await check('tema: acik/koyu', async () => {
+  A.applyTheme('light'); eq(document.documentElement.dataset.theme, 'light');
+  A.applyTheme('dark'); ok(!('theme' in document.documentElement.dataset), 'koyu temada attribute kalmamali');
+});
+await check('buyuk agda (200 kisi) dugumler ust uste binmez ve hepsi cizilir', async () => {
+  const n = 200;
+  const views = [];
+  for (let i = 0; i < n; i++) {
+    views.push({ id: i + 1, first_name: 'K' + i, relations: [] });
+  }
+  for (let i = 0; i < n; i++) {
+    const to = (i + 1) % n + 1;
+    views[i].relations.push({ owner: views[i].id, to, label: 'arkadasi' });
+    views[(i + 1) % n].relations.push({ owner: views[i].id, to, label: 'arkadasi' });
+  }
+  const svg = A.graphSvg(views);
+  eq((svg.match(/class="node"/g) || []).length, n, 'dugum sayisi');
+  const pts = [...svg.matchAll(/<circle cx="([-\d.]+)" cy="([-\d.]+)" r="([\d.]+)"/g)].map((m) => [+m[1], +m[2], +m[3]]);
+  eq(pts.length, n, 'daire sayisi');
+  let minD = Infinity;
+  for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) {
+    const d = Math.hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1]);
+    if (d < minD) minD = d;
+  }
+  ok(minD > 2 * pts[0][2], `dugumler cakisiyor (en yakin ${minD.toFixed(1)})`);
 });
 console.log(`\nSONUC: ${pass} basarili, ${fail} basarisiz`);
 py.stdin.end();

@@ -298,3 +298,14 @@ dialog.sheet::backdrop { background: rgba(0,0,0,.75); backdrop-filter: blur(10px
 }
 :root[data-theme="light"] .bg { background: var(--bg); }
 :root[data-theme="light"] .blob { opacity: .12; }
+
+/* Menuler ekranin alt kismindan acilir (bottom sheet) */
+dialog.sheet { margin: auto auto 0 auto; width: 100%; max-width: 640px; max-height: 92dvh; border-radius: 28px 28px 0 0; }
+dialog.sheet .sheet-body { border-radius: 28px 28px 0 0; max-height: 92dvh; }
+@media (min-width: 700px) { dialog.sheet .sheet-body { border-radius: 28px 28px 0 0; max-height: 92dvh; } }
+
+/* Harita: etiketler yalnizca yakinlasinca gorunur, surukleme ve tekerlek destegi */
+.graph-box svg { touch-action: none; cursor: grab; }
+.graph-box svg .edge-label, .graph-box svg .node text { display: none; }
+.graph-box svg.show-labels .edge-label, .graph-box svg.show-labels .node text { display: block; }
+.graph-controls { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 10px; }

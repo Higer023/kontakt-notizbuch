@@ -1006,16 +1006,39 @@ function statsHtml(all) {
 }
 
 // Iliskisi olan kisilerden SVG agi. Iliski yoksa null doner.
+const GRAPH_SIZE = 600;
+let graphW = GRAPH_SIZE;                         // tam gorunumun birim genisligi
+let gv = { x: 0, y: 0, w: GRAPH_SIZE, h: GRAPH_SIZE }; // mevcut gorunum (viewBox)
+let graphDrag = null;
+let graphMoved = false;
+
+// Halka duzeni: kisi sayisi arttikca yeni halkalar eklenir, dugumler ust uste binmez
+function ringLayout(n) {
+  const pts = [];
+  let left = n, r = 60, ring = 0;
+  while (left > 0) {
+    const cap = Math.min(left, Math.max(6, Math.floor((2 * Math.PI * r) / 26)));
+    for (let k = 0; k < cap; k++) {
+      const a = (2 * Math.PI * k) / cap - Math.PI / 2 + ring * 0.35;
+      pts.push({ x: r * Math.cos(a), y: r * Math.sin(a) });
+    }
+    left -= cap;
+    r += 34;
+    ring++;
+  }
+  return pts;
+}
+
 function graphSvg(all) {
   const nodes = all.filter((c) => c.relations.length);
   if (!nodes.length) return null;
-  const W = 600, H = 600, cx = W / 2, cy = H / 2;
-  const R = Math.min(cx, cy) - 80;
+  const raw = ringLayout(nodes.length);
+  const maxR = raw.reduce((m, p) => Math.max(m, Math.hypot(p.x, p.y)), 0);
+  graphW = Math.max(GRAPH_SIZE, Math.ceil(2 * (maxR + 50)));
+  const c = graphW / 2;
+  const nodeR = nodes.length <= 20 ? 16 : nodes.length <= 80 ? 11 : 8;
   const pos = new Map();
-  nodes.forEach((n, i) => {
-    const a = (2 * Math.PI * i) / nodes.length - Math.PI / 2;
-    pos.set(n.id, { x: cx + R * Math.cos(a), y: cy + R * Math.sin(a) });
-  });
+  nodes.forEach((n, i) => pos.set(n.id, { x: c + raw[i].x, y: c + raw[i].y }));
   const edges = [];
   for (const n of nodes) {
     for (const r of n.relations) {
@@ -1030,26 +1053,100 @@ function graphSvg(all) {
   }).join('');
   const svgNodes = nodes.map((n) => {
     const p = pos.get(n.id);
-    return `<g class="node" data-id="${Number(n.id)}"><circle cx="${p.x}" cy="${p.y}" r="22"/>` +
-      `<text x="${p.x}" y="${p.y + 38}">${esc(n.first_name)}</text></g>`;
+    return `<g class="node" data-id="${Number(n.id)}"><circle cx="${p.x}" cy="${p.y}" r="${nodeR}"/>` +
+      `<text x="${p.x}" y="${p.y + nodeR + 13}">${esc(n.first_name)}</text></g>`;
   }).join('');
-  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Iliski haritasi">${svgEdges}${svgNodes}</svg>`;
+  gv = { x: 0, y: 0, w: graphW, h: graphW };
+  return `<svg viewBox="0 0 ${graphW} ${graphW}" role="img" aria-label="Iliski haritasi">${svgEdges}${svgNodes}</svg>`;
+}
+
+function applyGraphView() {
+  const svg = document.querySelector('#graph-box svg');
+  if (!svg) return;
+  svg.setAttribute('viewBox', `${gv.x} ${gv.y} ${gv.w} ${gv.h}`);
+  svg.classList.toggle('show-labels', gv.w <= graphW * 0.55); // yakinlasinca etiketler gorunur
+}
+
+function zoomAt(factor, cx, cy) {
+  const nw = Math.min(graphW * 1.1, Math.max(graphW * 0.08, gv.w * factor));
+  const ax = (cx - gv.x) / gv.w, ay = (cy - gv.y) / gv.h;
+  gv = { x: cx - ax * nw, y: cy - ay * nw, w: nw, h: nw };
+  applyGraphView();
+}
+
+function zoomGraph(factor) {
+  zoomAt(factor, gv.x + gv.w / 2, gv.y + gv.h / 2);
+}
+
+function panGraph(dx, dy) { // gorunum genisliginin orani kadar kaydirir
+  gv = { ...gv, x: gv.x + dx * gv.w, y: gv.y + dy * gv.h };
+  applyGraphView();
+}
+
+function resetGraphView() {
+  gv = { x: 0, y: 0, w: graphW, h: graphW };
+  applyGraphView();
 }
 
 function openGraph() {
   const svg = graphSvg(buildViews());
   if (!svg) { alert('Henuz iliski yok.'); return; }
   $('#graph-box').innerHTML = svg;
+  applyGraphView();
   $('#graph-dialog').showModal();
 }
 
 $('#graph-btn').addEventListener('click', openGraph);
 $('#graph-close').addEventListener('click', () => $('#graph-dialog').close());
+
+// Mouse tekerlegi ile imlec noktasina yakinlastirma
+$('#graph-box').addEventListener('wheel', (e) => {
+  const svg = document.querySelector('#graph-box svg');
+  if (!svg) return;
+  e.preventDefault();
+  const rect = svg.getBoundingClientRect();
+  const cx = gv.x + ((e.clientX - rect.left) / rect.width) * gv.w;
+  const cy = gv.y + ((e.clientY - rect.top) / rect.height) * gv.h;
+  zoomAt(e.deltaY > 0 ? 1.15 : 1 / 1.15, cx, cy);
+}, { passive: false });
+
+// Surukleyerek kaydirma (dokunmatik ve mouse)
+$('#graph-box').addEventListener('pointerdown', (e) => {
+  graphDrag = { x: e.clientX, y: e.clientY };
+  graphMoved = false;
+  e.currentTarget.setPointerCapture(e.pointerId);
+});
+$('#graph-box').addEventListener('pointermove', (e) => {
+  const svg = document.querySelector('#graph-box svg');
+  if (!graphDrag || !svg) return;
+  const dxp = e.clientX - graphDrag.x, dyp = e.clientY - graphDrag.y;
+  graphDrag = { x: e.clientX, y: e.clientY };
+  if (Math.abs(dxp) + Math.abs(dyp) > 6) graphMoved = true;
+  const rect = svg.getBoundingClientRect();
+  gv = { ...gv, x: gv.x - dxp * (gv.w / rect.width), y: gv.y - dyp * (gv.h / rect.height) };
+  applyGraphView();
+});
+$('#graph-box').addEventListener('pointerup', () => { graphDrag = null; });
+$('#graph-box').addEventListener('pointercancel', () => { graphDrag = null; });
+
+// Surukleme bittiyse tiklama sayilmaz; dugume tiklaninca kisi acilir
 $('#graph-box').addEventListener('click', (e) => {
+  if (graphMoved) return;
   const id = Number(e.target.closest('.node')?.dataset.id);
   if (!id) return;
   $('#graph-dialog').close();
   openView(id);
+});
+
+$('#graph-controls').addEventListener('click', (e) => {
+  const act = e.target.closest('[data-g]')?.dataset.g;
+  if (act === 'in') zoomGraph(1 / 1.4);
+  if (act === 'out') zoomGraph(1.4);
+  if (act === 'reset') resetGraphView();
+  if (act === 'left') panGraph(-0.2, 0);
+  if (act === 'right') panGraph(0.2, 0);
+  if (act === 'up') panGraph(0, -0.2);
+  if (act === 'down') panGraph(0, 0.2);
 });
 
 function applyTheme(theme) {
