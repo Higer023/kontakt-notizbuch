@@ -31,9 +31,9 @@ const SOCIAL = {
 
 const SECURITY_HEADERS = {
   'Content-Security-Policy':
-    "default-src 'self'; script-src 'self'; style-src 'self'; " +
-    "img-src 'self' data: https://cdn.simpleicons.org; connect-src 'self'; " +
-    "frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    "default-src 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self'; " +
+    "img-src 'self' data: https://cdn.simpleicons.org; connect-src 'self' https://challenges.cloudflare.com; " +
+    "frame-src https://challenges.cloudflare.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
   'Referrer-Policy': 'no-referrer',
@@ -214,6 +214,11 @@ async function login(request, env, ip) {
     throw new HttpError(403, 'Konum izni olmadan giris yapilamaz');
   }
 
+  if (!(await verifyTurnstile(env, body.turnstile, ip))) {
+    await recordFootprint(env, request, ip, 'login_bot', false, body.fp);
+    throw new HttpError(403, 'Dogrulama basarisiz. Lutfen tekrar deneyin.');
+  }
+
   const username = typeof body.username === 'string' ? body.username.trim().slice(0, 100) : '';
   const password = typeof body.password === 'string' ? body.password : '';
   const ok = username.length > 0 && (await verifyAdminPassword(env, username, password));
@@ -228,6 +233,19 @@ async function login(request, env, ip) {
   ).bind(await sha256(token), `+${SESSION_HOURS} hours`, `+${REAUTH_MINUTES} minutes`).run();
 
   return json({ ok: true }, 200, { 'Set-Cookie': sessionCookie(token, SESSION_HOURS * 3600) });
+}
+
+// Cloudflare Turnstile dogrulamasi (sunucu tarafi)
+async function verifyTurnstile(env, token, ip) {
+  if (!env.TURNSTILE_SECRET) throw new HttpError(500, 'Dogrulama yapilandirilmamis');
+  if (typeof token !== 'string' || token.length === 0 || token.length > 2048) return false;
+  const form = new FormData();
+  form.append('secret', env.TURNSTILE_SECRET);
+  form.append('response', token);
+  if (ip && ip !== 'unknown') form.append('remoteip', ip);
+  const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body: form });
+  const data = await res.json().catch(() => ({}));
+  return data.success === true;
 }
 
 async function reauth(request, env, ip, session) {

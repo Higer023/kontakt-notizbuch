@@ -172,9 +172,46 @@ $('#reauth-dialog').addEventListener('close', () => {
   }
 });
 
+// ---------- Bosta kalinca oturumu kapat (15 dk) ----------
+
+const IDLE_MS = 15 * 60 * 1000;
+let idleTimer = null;
+let idleLastTouch = 0;
+let idleBound = false;
+
+function resetIdle() {
+  const now = Date.now();
+  if (now - idleLastTouch < 1000) return;
+  idleLastTouch = now;
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(idleLogout, IDLE_MS);
+}
+
+function startIdle() {
+  if (!idleBound) {
+    ['pointerdown', 'keydown', 'touchstart', 'scroll'].forEach((ev) =>
+      document.addEventListener(ev, resetIdle, { passive: true }));
+    idleBound = true;
+  }
+  resetIdle();
+}
+
+function stopIdle() {
+  clearTimeout(idleTimer);
+  idleTimer = null;
+}
+
+async function idleLogout() {
+  stopIdle();
+  await api('/api/logout', { method: 'POST', body: {} }).catch(() => {});
+  showLogin('Uzun sure islem yapilmadigi icin oturum kapatildi.');
+}
+
 // ---------- Giris ----------
 
 function showLogin(message = '') {
+  stopIdle();
+  window.turnstile?.reset();
   $('#app-view').classList.add('hidden');
   $('#login-view').classList.remove('hidden');
   $('#password').value = '';
@@ -183,6 +220,7 @@ function showLogin(message = '') {
 }
 
 function showApp() {
+  startIdle();
   $('#login-view').classList.add('hidden');
   $('#app-view').classList.remove('hidden');
   loadContacts().catch(alertError);
@@ -194,14 +232,17 @@ $('#login-form').addEventListener('submit', async (e) => {
   try {
     const geo = await getGeo();
     const fp = await getFingerprint(geo);
+    const turnstile = window.turnstile ? window.turnstile.getResponse() : '';
+    if (!turnstile) throw new Error('Lutfen dogrulamayi tamamlayin.');
     await api('/api/login', {
       method: 'POST',
-      body: { username: $('#username').value, password: $('#password').value, fp },
+      body: { username: $('#username').value, password: $('#password').value, fp, turnstile },
     });
     $('#login-error').textContent = '';
     showApp();
   } catch (err) {
     $('#login-error').textContent = err.message;
+    window.turnstile?.reset();
   }
 });
 

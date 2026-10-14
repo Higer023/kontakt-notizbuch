@@ -8,6 +8,7 @@
   <meta name="apple-mobile-web-app-title" content="Rehber">
   <title>Rehber</title>
   <link rel="stylesheet" href="/style.css">
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 </head>
 <body>
   <div class="bg" aria-hidden="true"><span class="blob b1"></span><span class="blob b2"></span></div>
@@ -19,6 +20,7 @@
       <p class="muted">Giris icin kullanici adi, sifre ve konum izni gerekir.</p>
       <input type="text" id="username" placeholder="Kullanici adi" autocomplete="username" required>
       <input type="password" id="password" placeholder="Sifre" autocomplete="current-password" required>
+      <div class="cf-turnstile" data-sitekey="0x4AAAAAAFWHrfVQBQ0eBkIP" data-theme="dark"></div>
       <button type="submit" class="btn-primary">Konum izniyle giris yap</button>
       <p id="login-error" class="error" role="alert"></p>
     </form>
