@@ -28,12 +28,12 @@
 
   <section id="app-view" class="hidden">
     <header class="largebar">
+      <button id="summary-btn" class="pill glass small" aria-label="Ozet">Ozet</button>
       <div>
         <p class="eyebrow">Kisisel</p>
         <h1 id="page-title">Kisiler</h1>
       </div>
       <div class="head-actions">
-        <button id="graph-btn" class="pill glass small" aria-label="Iliski haritasi">Ag</button>
         <button id="theme-btn" class="pill glass small" aria-label="Tema degistir">Tema</button>
         <button id="logout-btn" class="pill glass">Cikis</button>
       </div>
@@ -41,7 +41,6 @@
 
     <main>
       <div id="contacts-tab">
-        <div id="stats-bar" class="stats-bar"></div>
         <div class="toolbar">
           <input type="search" id="search" class="glass search" placeholder="Ara: isim, okul, grup, etiket">
           <select id="group-filter" class="glass select"><option value="">Tum gruplar</option></select>
@@ -69,10 +68,19 @@
 
     <nav class="tabbar glass">
       <button class="tab active" data-tab="contacts"><span class="ico">&#x25A6;</span>Kisiler</button>
+      <button id="graph-btn" class="tab tab-action" aria-label="Iliski haritasi"><span class="ico">&#x25C9;</span>IH</button>
       <button id="add-btn" class="fab" aria-label="Kisi ekle">+</button>
       <button class="tab" data-tab="security"><span class="ico">&#x25C9;</span>Guvenlik</button>
     </nav>
   </section>
+
+  <dialog id="summary-dialog" class="sheet">
+    <div class="sheet-body form">
+      <div class="sheet-grip"></div>
+      <div class="section-title"><h2>Ozet</h2><button type="button" id="summary-close" class="pill glass small">Kapat</button></div>
+      <div id="summary-box"></div>
+    </div>
+  </dialog>
 
   <dialog id="graph-dialog" class="sheet">
     <div class="sheet-body form">

@@ -257,7 +257,7 @@ $('#logout-btn').addEventListener('click', async () => {
 
 // ---------- Sekmeler ----------
 
-document.querySelectorAll('.tab').forEach((btn) => {
+document.querySelectorAll('.tab[data-tab]').forEach((btn) => {
   btn.addEventListener('click', () => switchTab(btn.dataset.tab));
 });
 
@@ -531,7 +531,6 @@ async function loadContacts() {
   const group = $('#group-filter').value;
   const all = buildViews();
   renderGroups(all);
-  $('#stats-bar').innerHTML = statsHtml(all);
   contacts = all
     .filter((c) => !group || c.group_name === group)
     .filter((c) => !q || [c.first_name, c.last_name, c.nickname, c.city, c.school, c.group_name, c.occupation, c.tags, c.email]
@@ -987,23 +986,45 @@ function alertError(err) {
 
 // ---------- Ozet, tema, iliski haritasi ----------
 
-function statsHtml(all) {
-  const cities = new Map();
-  const groups = new Set();
+// Ozet: tum istatistikler ve ortalamalar (sol ustteki Ozet dugmesinde)
+function summaryHtml(all) {
+  const n = all.length;
+  if (!n) return '<div class="empty">Henuz kisi yok.</div>';
+  const groups = new Map(), cities = new Map();
+  const ages = [];
+  let edges = 0, noRel = 0, topPerson = null, topN = 0;
   for (const c of all) {
-    if (c.group_name) groups.add(c.group_name);
+    if (c.group_name) groups.set(c.group_name, (groups.get(c.group_name) || 0) + 1);
     if (c.city) cities.set(c.city, (cities.get(c.city) || 0) + 1);
+    if (typeof c.age === 'number') ages.push(c.age);
+    edges += c.relations.filter((r) => r.owner === c.id).length; // her iliski bir kez sayilir
+    const deg = c.relations.length;
+    if (!deg) noRel++;
+    if (deg > topN) { topN = deg; topPerson = c; }
   }
-  let topCity = '-', topN = 0;
-  for (const [k, v] of cities) if (v > topN) { topCity = k; topN = v; }
+  const top = (m) => { let b = '-', k = 0; for (const [x, v] of m) if (v > k) { b = x; k = v; } return b; };
+  const avg = (arr, d = 1) => (arr.length ? (arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(d) : '-');
   const latest = [...records.values()].sort((a, b) => b.id - a.id).slice(0, 3)
     .map((r) => [r.data.first_name, r.data.last_name].filter(Boolean).join(' '));
-  return `
-    <div class="glass"><b>${all.length}</b><span>Kisi</span></div>
-    <div class="glass"><b>${groups.size}</b><span>Grup</span></div>
-    <div class="glass"><b>${esc(topCity)}</b><span>En cok sehir</span></div>
-    <div class="glass stats-latest">Son eklenenler: ${latest.length ? latest.map((n) => esc(n)).join(', ') : '-'}</div>`;
+  const tiles = [
+    [n, 'Kisi'], [groups.size, 'Grup'], [edges, 'Iliski'], [noRel, 'Iliskisiz kisi'],
+    [avg([...Array(n)].map((_, i) => 0).concat([(edges * 2) / n])).replace(/^0\.0$/, '0'), 'Kisi basi ort. iliski'],
+    [avg(ages, 1), 'Ortalama yas'], [groups.size ? (n / groups.size).toFixed(1) : '-', 'Grup basi ort. kisi'],
+    [esc(top(groups)), 'En buyuk grup'], [esc(top(cities)), 'En cok sehir'],
+  ];
+  const tilesHtml = tiles.map(([v, l]) => `<div class="glass"><b>${v}</b><span>${l}</span></div>`).join('');
+  const topHtml = topPerson && topN
+    ? `<div class="glass stats-latest">En cok iliskisi olan: ${esc(fullName(topPerson))} (${topN})</div>` : '';
+  return `<div class="stats-bar">${tilesHtml}${topHtml}` +
+    `<div class="glass stats-latest">Son eklenenler: ${latest.map((x) => esc(x)).join(', ')}</div></div>`;
 }
+
+function openSummary() {
+  $('#summary-box').innerHTML = summaryHtml(buildViews());
+  $('#summary-dialog').showModal();
+}
+$('#summary-btn').addEventListener('click', openSummary);
+$('#summary-close').addEventListener('click', () => $('#summary-dialog').close());
 
 // Iliskisi olan kisilerden SVG agi. Iliski yoksa null doner.
 const GRAPH_SIZE = 600;

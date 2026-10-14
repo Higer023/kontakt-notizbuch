@@ -140,7 +140,7 @@ globalThis.fetch = async (url, opts = {}) => {
 new Function(fs.readFileSync(path.join(ROOT, 'public', 'crypto.js'), 'utf8'))();
 globalThis.Vault = globalThis.window.Vault;
 const A = new Function(fs.readFileSync(path.join(ROOT, 'public', 'app.js'), 'utf8') + `
-return { records, buildViews, unlockVault, persist, deleteContactById, addRelations, removeRelation, validate, computeAge, legacyToData, cardHtml, viewHtml, openEdit, statsHtml, graphSvg, applyTheme, ringLayout };`)();
+return { records, buildViews, unlockVault, persist, deleteContactById, addRelations, removeRelation, validate, computeAge, legacyToData, cardHtml, viewHtml, openEdit, summaryHtml, graphSvg, applyTheme, ringLayout };`)();
 await new Promise((r) => setTimeout(r, 1500)); // acilis (api /api/me) bitsin
 
 console.log('--- Istemci + sunucu testleri ---');
@@ -218,9 +218,10 @@ await check('kart ve detay render hata vermez', async () => {
   A.openEdit(v[0]);
 });
 await check('ozet: kisi sayisi ve grup', async () => {
-  const h = A.statsHtml(A.buildViews());
+  const h = A.summaryHtml(A.buildViews());
   ok(h.includes('<b>3</b>'), 'kisi sayisi 3 degil');
   ok(h.includes('Son eklenenler'), 'son eklenenler yok');
+  ok(h.includes('Ortalama yas'), 'ortalama yas yok');
 });
 await check('iliski agi: yalnizca iliskili kisiler, her iliski bir kez', async () => {
   const svg = A.graphSvg(A.buildViews());
