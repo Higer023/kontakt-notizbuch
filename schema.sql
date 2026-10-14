@@ -72,3 +72,15 @@ CREATE TABLE IF NOT EXISTS relations (
 );
 CREATE INDEX IF NOT EXISTS idx_relations_from ON relations (from_id);
 CREATE INDEX IF NOT EXISTS idx_relations_to ON relations (to_id);
+
+-- Sifreli veri (istemci tarafli AES-GCM). Tum ifadeler idempotent.
+CREATE TABLE IF NOT EXISTS vault (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  salt TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS encrypted_contacts (
+  id INTEGER PRIMARY KEY,
+  payload TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
