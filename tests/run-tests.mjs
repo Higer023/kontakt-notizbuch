@@ -222,6 +222,7 @@ await check('ozet: kisi sayisi ve grup', async () => {
   ok(h.includes('<b>3</b>'), 'kisi sayisi 3 degil');
   ok(h.includes('Son eklenenler'), 'son eklenenler yok');
   ok(h.includes('Ortalama yas'), 'ortalama yas yok');
+  ok(h.includes('<b>0.7</b><span>Kisi basi ort. iliski'), 'kisi basi iliski ortalamasi yanlis: ' + h.slice(0, 400));
 });
 await check('iliski agi: yalnizca iliskili kisiler, her iliski bir kez', async () => {
   const svg = A.graphSvg(A.buildViews());

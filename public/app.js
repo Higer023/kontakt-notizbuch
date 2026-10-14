@@ -1008,7 +1008,7 @@ function summaryHtml(all) {
     .map((r) => [r.data.first_name, r.data.last_name].filter(Boolean).join(' '));
   const tiles = [
     [n, 'Kisi'], [groups.size, 'Grup'], [edges, 'Iliski'], [noRel, 'Iliskisiz kisi'],
-    [avg([...Array(n)].map((_, i) => 0).concat([(edges * 2) / n])).replace(/^0\.0$/, '0'), 'Kisi basi ort. iliski'],
+    [((edges * 2) / n).toFixed(1), 'Kisi basi ort. iliski'],
     [avg(ages, 1), 'Ortalama yas'], [groups.size ? (n / groups.size).toFixed(1) : '-', 'Grup basi ort. kisi'],
     [esc(top(groups)), 'En buyuk grup'], [esc(top(cities)), 'En cok sehir'],
   ];
