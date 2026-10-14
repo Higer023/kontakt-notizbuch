@@ -84,3 +84,8 @@ CREATE TABLE IF NOT EXISTS encrypted_contacts (
   payload TEXT NOT NULL,
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS migrations (
+  name TEXT PRIMARY KEY,
+  done_at TEXT NOT NULL DEFAULT (datetime('now'))
+);

@@ -108,29 +108,139 @@ async function handleApi(request, env, url) {
     requireFresh();
     return unblockIp(env, url);
   }
-  if (pathname === '/api/contacts' && method === 'GET') return listContacts(env, url);
-  if (pathname === '/api/contacts' && method === 'POST') return createContact(request, env);
-  if (pathname === '/api/relations' && method === 'POST') return createRelation(request, env);
-  if (pathname === '/api/relations/bulk' && method === 'POST') return bulkRelations(request, env);
+  if (pathname === '/api/vault/status' && method === 'GET') return vaultStatus(env);
+  if (pathname === '/api/vault/init' && method === 'POST') return vaultInit(request, env);
+  if (pathname === '/api/vault/contacts' && method === 'GET') return vaultList(env);
+  if (pathname === '/api/vault/contacts' && method === 'POST') return vaultCreate(request, env);
+  if (pathname === '/api/vault/batch' && method === 'POST') return vaultBatch(request, env, session.fresh);
+  if (pathname === '/api/vault/legacy' && method === 'GET') return vaultLegacy(env);
+  if (pathname === '/api/vault/import' && method === 'POST') return vaultImport(request, env);
 
-  const contactMatch = pathname.match(/^\/api\/contacts\/(\d+)$/);
-  if (contactMatch) {
-    const id = Number(contactMatch[1]);
-    if (method === 'GET') return getContact(env, id);
-    if (method === 'PUT') return updateContact(request, env, id);
+  const vaultMatch = pathname.match(/^\/api\/vault\/contacts\/(\d+)$/);
+  if (vaultMatch) {
+    const id = Number(vaultMatch[1]);
+    if (method === 'PUT') return vaultPut(request, env, id);
     if (method === 'DELETE') {
       requireFresh();
-      return deleteContact(env, id);
+      return vaultDelete(env, id);
     }
   }
 
-  const relMatch = pathname.match(/^\/api\/relations\/(\d+)$/);
-  if (relMatch && method === 'DELETE') {
-    requireFresh();
-    return deleteRelation(env, Number(relMatch[1]));
-  }
-
   throw new HttpError(404, 'Bulunamadi');
+}
+
+// ---------- Sifreli kasa (istemci tarafli AES-GCM) ----------
+// Sunucu kisi verisini sadece sifreli payload olarak saklar; cozme anahtari tarayicidadir.
+
+const PAYLOAD_MAX = 50000;
+const VAULT_BATCH_MAX = 500;
+
+function checkPayload(p) {
+  if (typeof p !== 'string' || p.length === 0 || p.length > PAYLOAD_MAX) {
+    throw new HttpError(400, 'Gecersiz sifreli veri');
+  }
+  return p;
+}
+
+function checkId(v) {
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1) throw new HttpError(400, 'Gecersiz kayit');
+  return n;
+}
+
+async function isMigrated(env) {
+  const m = await env.DB.prepare("SELECT name FROM migrations WHERE name = 'contacts_v1'").first();
+  return !!m;
+}
+
+async function vaultStatus(env) {
+  const v = await env.DB.prepare('SELECT salt FROM vault WHERE id = 1').first();
+  return json({ salt: v ? v.salt : null, migrated: await isMigrated(env) });
+}
+
+async function vaultInit(request, env) {
+  const body = await readJson(request);
+  const salt = typeof body.salt === 'string' && body.salt.length >= 16 && body.salt.length <= 64 ? body.salt : null;
+  if (!salt) throw new HttpError(400, 'Gecersiz tuz');
+  // Ilk yazilan tuz kalir; sonraki isteklerde ayni tuz geri doner.
+  await env.DB.prepare('INSERT OR IGNORE INTO vault (id, salt) VALUES (1, ?)').bind(salt).run();
+  const row = await env.DB.prepare('SELECT salt FROM vault WHERE id = 1').first();
+  return json({ salt: row.salt });
+}
+
+async function vaultList(env) {
+  const { results } = await env.DB.prepare(
+    'SELECT id, payload, updated_at FROM encrypted_contacts ORDER BY id LIMIT ?'
+  ).bind(VAULT_BATCH_MAX * 10).all();
+  return json({ contacts: results });
+}
+
+async function vaultCreate(request, env) {
+  const body = await readJson(request);
+  const payload = checkPayload(body.payload);
+  const row = await env.DB.prepare(
+    'INSERT INTO encrypted_contacts (payload) VALUES (?) RETURNING id, payload, updated_at'
+  ).bind(payload).first();
+  return json({ contact: row }, 201);
+}
+
+async function vaultPut(request, env, id) {
+  const body = await readJson(request);
+  const payload = checkPayload(body.payload);
+  const row = await env.DB.prepare(
+    "UPDATE encrypted_contacts SET payload = ?, updated_at = datetime('now') WHERE id = ? RETURNING id, payload, updated_at"
+  ).bind(payload, id).first();
+  if (!row) throw new HttpError(404, 'Kisi bulunamadi');
+  return json({ contact: row });
+}
+
+async function vaultDelete(env, id) {
+  await env.DB.prepare('DELETE FROM encrypted_contacts WHERE id = ?').bind(id).run();
+  return json({ ok: true });
+}
+
+// Birden fazla kisiyi tek atomik islemde gunceller/siler (iliski ve silme icin)
+async function vaultBatch(request, env, fresh) {
+  const body = await readJson(request);
+  const puts = Array.isArray(body.puts) ? body.puts : [];
+  const deletes = Array.isArray(body.deletes) ? body.deletes : [];
+  if (puts.length + deletes.length === 0 || puts.length + deletes.length > VAULT_BATCH_MAX) {
+    throw new HttpError(400, 'Gecersiz toplu islem');
+  }
+  // Silme islemi icin yeniden dogrulama gerekir
+  if (deletes.length && !fresh) throw new HttpError(428, 'Bu islem icin sifrenizi tekrar girin');
+  const stmts = [
+    ...puts.map((p) => env.DB.prepare(
+      "INSERT OR REPLACE INTO encrypted_contacts (id, payload, updated_at) VALUES (?, ?, datetime('now'))"
+    ).bind(checkId(p.id), checkPayload(p.payload))),
+    ...deletes.map((id) => env.DB.prepare('DELETE FROM encrypted_contacts WHERE id = ?').bind(checkId(id))),
+  ];
+  await env.DB.batch(stmts);
+  return json({ ok: true });
+}
+
+// Eski duz metin kisiler (gecis icin, yalnizca migrasyon bitmediyse)
+async function vaultLegacy(env) {
+  if (await isMigrated(env)) throw new HttpError(409, 'Gecis zaten tamamlandi');
+  const contacts = await env.DB.prepare('SELECT * FROM contacts ORDER BY id').all();
+  const relations = await env.DB.prepare('SELECT * FROM relations ORDER BY id').all();
+  return json({ contacts: contacts.results, relations: relations.results });
+}
+
+// Gecis: istemci duz metni sifreleyip gonderir. final=true olunca bir daha calismaz.
+async function vaultImport(request, env) {
+  if (await isMigrated(env)) throw new HttpError(409, 'Gecis zaten tamamlandi');
+  const body = await readJson(request);
+  const records = Array.isArray(body.records) ? body.records : [];
+  if (records.length > VAULT_BATCH_MAX) throw new HttpError(400, 'Cok fazla kayit');
+  const stmts = records.map((r) => env.DB.prepare(
+    "INSERT OR REPLACE INTO encrypted_contacts (id, payload, updated_at) VALUES (?, ?, datetime('now'))"
+  ).bind(checkId(r.id), checkPayload(r.payload)));
+  if (body.final === true) {
+    stmts.push(env.DB.prepare("INSERT OR IGNORE INTO migrations (name) VALUES ('contacts_v1')"));
+  }
+  if (stmts.length) await env.DB.batch(stmts);
+  return json({ imported: records.length, done: body.final === true }, 201);
 }
 
 async function rateLimit(env, ip) {
