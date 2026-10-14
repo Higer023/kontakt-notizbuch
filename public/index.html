@@ -28,14 +28,9 @@
 
   <section id="app-view" class="hidden">
     <header class="largebar">
-      <button id="summary-btn" class="pill glass small" aria-label="Ozet">Ozet</button>
       <div>
         <p class="eyebrow">Kisisel</p>
         <h1 id="page-title">Kisiler</h1>
-      </div>
-      <div class="head-actions">
-        <button id="theme-btn" class="pill glass small" aria-label="Tema degistir">Tema</button>
-        <button id="logout-btn" class="pill glass">Cikis</button>
       </div>
     </header>
 
@@ -67,12 +62,35 @@
     </main>
 
     <nav class="tabbar glass">
-      <button class="tab active" data-tab="contacts"><span class="ico">&#x25A6;</span>Kisiler</button>
-      <button id="graph-btn" class="tab tab-action" aria-label="Iliski haritasi"><span class="ico">&#x25C9;</span>IH</button>
+      <button id="menu-open" class="menu-open glass" aria-label="Menu">&#9776;</button>
       <button id="add-btn" class="fab" aria-label="Kisi ekle">+</button>
-      <button class="tab" data-tab="security"><span class="ico">&#x25C9;</span>Guvenlik</button>
     </nav>
   </section>
+
+  <dialog id="main-menu" class="sheet">
+    <div class="sheet-body form">
+      <div class="sheet-grip"></div>
+      <h2>Menu</h2>
+      <div class="graph-menu-list">
+        <button type="button" class="glass" data-m="contacts">Kisiler</button>
+        <button type="button" class="glass" data-m="graph">Iliski haritasi</button>
+        <button type="button" class="glass" data-m="summary">Ozet</button>
+        <button type="button" class="glass" data-m="security">Guvenlik</button>
+        <button type="button" class="glass" data-m="settings">Ayarlar</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="settings-dialog" class="sheet">
+    <div class="sheet-body form">
+      <div class="sheet-grip"></div>
+      <div class="section-title"><h2>Ayarlar</h2><button type="button" id="settings-close" class="pill glass small">Kapat</button></div>
+      <div class="graph-menu-list">
+        <button type="button" id="theme-btn" class="glass">Tema degistir (acik / koyu)</button>
+        <button type="button" id="logout-btn" class="glass btn-danger">Cikis yap</button>
+      </div>
+    </div>
+  </dialog>
 
   <dialog id="summary-dialog" class="sheet">
     <div class="sheet-body form">

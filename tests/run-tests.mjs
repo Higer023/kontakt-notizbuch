@@ -269,6 +269,20 @@ await check('ih: 2 parmak yakinlastirma sonrasi gorunum kuculur', async () => {
   const svg = A.graphSvg(A.buildViews());
   ok(svg && svg.includes('viewBox='), 'svg yok');
 });
+await check('alt bar: sadece 2 gorunur dugme (menu + ekle)', async () => {
+  const idx = fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8');
+  const start = idx.indexOf('<nav class="tabbar');
+  const nav = idx.slice(start, idx.indexOf('</nav>', start));
+  eq((nav.match(/<button/g) || []).length, 2, 'alt bar dugme sayisi');
+  ok(nav.includes('id="menu-open"') && nav.includes('id="add-btn"'), 'menu veya ekle dugmesi yok');
+});
+await check('html: JS kullanan her kimlik sayfada veya JS isaretlemesinde var', async () => {
+  const js = fs.readFileSync(path.join(ROOT, 'public', 'app.js'), 'utf8');
+  const idx = fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8');
+  const ids = [...new Set([...js.matchAll(/\$\('#([\w-]+)'\)/g)].map((m) => m[1]))];
+  const missing = ids.filter((i) => !idx.includes(`id="${i}"`) && !js.includes(`id="${i}"`));
+  eq(missing, [], 'eksik kimlikler');
+});
 console.log(`\\nSONUC: ${pass} basarili, ${fail} basarisiz`);
 py.stdin.end();
 process.exit(fail ? 1 : 0);

@@ -213,6 +213,11 @@ function showLogin(message = '') {
   stopIdle();
   Vault.lock();
   records.clear();
+  // Acik menu/diyaloglar giris ekraninin ustunde kalmasin
+  for (const id of ['main-menu', 'settings-dialog', 'summary-dialog', 'graph-dialog', 'graph-menu', 'view-dialog', 'contact-dialog', 'bulk-dialog', 'reauth-dialog']) {
+    const d = document.getElementById(id);
+    if (d && d.open) d.close();
+  }
   window.turnstile?.reset();
   $('#app-view').classList.add('hidden');
   $('#login-view').classList.remove('hidden');
@@ -254,6 +259,20 @@ $('#logout-btn').addEventListener('click', async () => {
   await api('/api/logout', { method: 'POST', body: {} }).catch(() => {});
   showLogin();
 });
+
+// ---------- Ana menu (alt bar hamburger): Kisiler, IH, Ozet, Guvenlik, Ayarlar ----------
+$('#menu-open').addEventListener('click', () => $('#main-menu').showModal());
+$('#main-menu').addEventListener('click', (e) => {
+  const act = e.target.closest('[data-m]')?.dataset.m;
+  if (!act) return;
+  $('#main-menu').close();
+  if (act === 'contacts') switchTab('contacts');
+  if (act === 'security') switchTab('security');
+  if (act === 'graph') openGraph();
+  if (act === 'summary') openSummary();
+  if (act === 'settings') $('#settings-dialog').showModal();
+});
+$('#settings-close').addEventListener('click', () => $('#settings-dialog').close());
 
 // ---------- Sekmeler ----------
 
@@ -1023,7 +1042,6 @@ function openSummary() {
   $('#summary-box').innerHTML = summaryHtml(buildViews());
   $('#summary-dialog').showModal();
 }
-$('#summary-btn').addEventListener('click', openSummary);
 $('#summary-close').addEventListener('click', () => $('#summary-dialog').close());
 
 // Iliskisi olan kisilerden SVG agi. Iliski yoksa null doner.
@@ -1137,7 +1155,6 @@ function openGraph() {
   $('#graph-dialog').showModal();
 }
 
-$('#graph-btn').addEventListener('click', openGraph);
 $('#graph-close').addEventListener('click', () => $('#graph-dialog').close());
 $('#graph-dialog').addEventListener('close', () => { document.body.style.overflow = ''; });
 

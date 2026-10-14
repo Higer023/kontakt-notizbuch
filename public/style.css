@@ -322,3 +322,7 @@ dialog.graph-sheet .sheet-body { height: 100dvh; max-height: 100dvh; border-radi
 .graph-bar { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: auto; }
 .graph-menu-list { display: grid; gap: 8px; }
 .graph-menu-list button { width: 100%; text-align: left; padding: 14px 16px; border-radius: 16px; color: var(--ink); font-size: 1rem; }
+
+/* Alt bar: sadece hamburger ve ekle dugmesi gorunur */
+.tabbar { display: flex; justify-content: center; align-items: center; gap: 16px; }
+.menu-open { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; padding: 0; font-size: 1.3rem; color: var(--ink); }
