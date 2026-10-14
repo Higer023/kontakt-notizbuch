@@ -268,3 +268,33 @@ dialog.sheet::backdrop { background: rgba(0,0,0,.75); backdrop-filter: blur(10px
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* Ozet cubugu */
+.head-actions { display: flex; gap: 8px; align-items: center; }
+.stats-bar { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 0 0 12px; }
+.stats-bar .glass { border-radius: 20px; padding: 12px 10px; display: grid; gap: 3px; text-align: center; min-width: 0; }
+.stats-bar b { font-size: 1.1rem; color: var(--mint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-bar span { font-size: .72rem; color: var(--ink-soft); }
+.stats-bar .stats-latest { grid-column: 1 / -1; text-align: left; font-size: .85rem; color: var(--ink-soft); }
+
+/* Iliski haritasi */
+.graph-box { width: 100%; aspect-ratio: 1 / 1; max-height: 70vh; border-radius: 22px; border: 1px solid var(--line); background: rgba(255,255,255,.02); overflow: hidden; }
+.graph-box svg { width: 100%; height: 100%; display: block; }
+.graph-box .edge { stroke: var(--line-strong); stroke-width: 1.2; }
+.graph-box .edge-label { fill: var(--ink-soft); font-size: 10px; }
+.graph-box .node { cursor: pointer; }
+.graph-box .node circle { fill: var(--glass-strong); stroke: var(--mint); stroke-width: 1.5; }
+.graph-box .node text { fill: var(--ink); font-size: 11px; text-anchor: middle; pointer-events: none; }
+.graph-box .node:hover circle { stroke-width: 2.5; }
+
+/* Acik tema */
+:root[data-theme="light"] {
+  --bg: #f4f4f7; --ink: #111114; --ink-soft: #5d5d66;
+  --glass: rgba(255, 255, 255, 0.6); --glass-strong: rgba(255, 255, 255, 0.97);
+  --line: rgba(0, 0, 0, 0.08); --line-strong: rgba(0, 0, 0, 0.18);
+  --shadow: 0 16px 40px -20px rgba(0, 0, 0, 0.25);
+  --mint: #2a8a6a; --lavender: #6b4fc4; --danger: #c2334a; --ok: #2a8a6a;
+  color-scheme: light;
+}
+:root[data-theme="light"] .bg { background: var(--bg); }
+:root[data-theme="light"] .blob { opacity: .12; }

@@ -531,6 +531,7 @@ async function loadContacts() {
   const group = $('#group-filter').value;
   const all = buildViews();
   renderGroups(all);
+  $('#stats-bar').innerHTML = statsHtml(all);
   contacts = all
     .filter((c) => !group || c.group_name === group)
     .filter((c) => !q || [c.first_name, c.last_name, c.nickname, c.city, c.school, c.group_name, c.occupation, c.tags, c.email]
@@ -983,6 +984,91 @@ $('#security-tab').addEventListener('click', async (e) => {
 function alertError(err) {
   alert(err?.message || 'Bir hata olustu');
 }
+
+// ---------- Ozet, tema, iliski haritasi ----------
+
+function statsHtml(all) {
+  const cities = new Map();
+  const groups = new Set();
+  for (const c of all) {
+    if (c.group_name) groups.add(c.group_name);
+    if (c.city) cities.set(c.city, (cities.get(c.city) || 0) + 1);
+  }
+  let topCity = '-', topN = 0;
+  for (const [k, v] of cities) if (v > topN) { topCity = k; topN = v; }
+  const latest = [...records.values()].sort((a, b) => b.id - a.id).slice(0, 3)
+    .map((r) => [r.data.first_name, r.data.last_name].filter(Boolean).join(' '));
+  return `
+    <div class="glass"><b>${all.length}</b><span>Kisi</span></div>
+    <div class="glass"><b>${groups.size}</b><span>Grup</span></div>
+    <div class="glass"><b>${esc(topCity)}</b><span>En cok sehir</span></div>
+    <div class="glass stats-latest">Son eklenenler: ${latest.length ? latest.map((n) => esc(n)).join(', ') : '-'}</div>`;
+}
+
+// Iliskisi olan kisilerden SVG agi. Iliski yoksa null doner.
+function graphSvg(all) {
+  const nodes = all.filter((c) => c.relations.length);
+  if (!nodes.length) return null;
+  const W = 600, H = 600, cx = W / 2, cy = H / 2;
+  const R = Math.min(cx, cy) - 80;
+  const pos = new Map();
+  nodes.forEach((n, i) => {
+    const a = (2 * Math.PI * i) / nodes.length - Math.PI / 2;
+    pos.set(n.id, { x: cx + R * Math.cos(a), y: cy + R * Math.sin(a) });
+  });
+  const edges = [];
+  for (const n of nodes) {
+    for (const r of n.relations) {
+      if (r.owner !== n.id || !pos.has(r.to)) continue; // her iliski bir kez cizilir
+      edges.push({ a: pos.get(n.id), b: pos.get(r.to), label: r.label });
+    }
+  }
+  const svgEdges = edges.map((e) => {
+    const mx = (e.a.x + e.b.x) / 2, my = (e.a.y + e.b.y) / 2;
+    return `<line class="edge" x1="${e.a.x}" y1="${e.a.y}" x2="${e.b.x}" y2="${e.b.y}"/>` +
+      `<text class="edge-label" x="${mx}" y="${my}" text-anchor="middle">${esc(e.label)}</text>`;
+  }).join('');
+  const svgNodes = nodes.map((n) => {
+    const p = pos.get(n.id);
+    return `<g class="node" data-id="${Number(n.id)}"><circle cx="${p.x}" cy="${p.y}" r="22"/>` +
+      `<text x="${p.x}" y="${p.y + 38}">${esc(n.first_name)}</text></g>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Iliski haritasi">${svgEdges}${svgNodes}</svg>`;
+}
+
+function openGraph() {
+  const svg = graphSvg(buildViews());
+  if (!svg) { alert('Henuz iliski yok.'); return; }
+  $('#graph-box').innerHTML = svg;
+  $('#graph-dialog').showModal();
+}
+
+$('#graph-btn').addEventListener('click', openGraph);
+$('#graph-close').addEventListener('click', () => $('#graph-dialog').close());
+$('#graph-box').addEventListener('click', (e) => {
+  const id = Number(e.target.closest('.node')?.dataset.id);
+  if (!id) return;
+  $('#graph-dialog').close();
+  openView(id);
+});
+
+function applyTheme(theme) {
+  if (theme === 'light') document.documentElement.dataset.theme = 'light';
+  else delete document.documentElement.dataset.theme;
+}
+// Depolama engelliyse (bazi gizli modlar) uygulama yine acilir
+function savedTheme() {
+  try { return localStorage.getItem('theme'); } catch { return null; }
+}
+function saveTheme(theme) {
+  try { localStorage.setItem('theme', theme); } catch { /* yoksay */ }
+}
+$('#theme-btn').addEventListener('click', () => {
+  const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+  saveTheme(next);
+  applyTheme(next);
+});
+applyTheme(savedTheme() || 'dark');
 
 api('/api/me').then(() => {
   if (Vault.isUnlocked()) showApp();

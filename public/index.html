@@ -32,11 +32,16 @@
         <p class="eyebrow">Kisisel</p>
         <h1 id="page-title">Kisiler</h1>
       </div>
-      <button id="logout-btn" class="pill glass">Cikis</button>
+      <div class="head-actions">
+        <button id="graph-btn" class="pill glass small" aria-label="Iliski haritasi">Ag</button>
+        <button id="theme-btn" class="pill glass small" aria-label="Tema degistir">Tema</button>
+        <button id="logout-btn" class="pill glass">Cikis</button>
+      </div>
     </header>
 
     <main>
       <div id="contacts-tab">
+        <div id="stats-bar" class="stats-bar"></div>
         <div class="toolbar">
           <input type="search" id="search" class="glass search" placeholder="Ara: isim, okul, grup, etiket">
           <select id="group-filter" class="glass select"><option value="">Tum gruplar</option></select>
@@ -68,6 +73,15 @@
       <button class="tab" data-tab="security"><span class="ico">&#x25C9;</span>Guvenlik</button>
     </nav>
   </section>
+
+  <dialog id="graph-dialog" class="sheet">
+    <div class="sheet-body form">
+      <div class="sheet-grip"></div>
+      <div class="section-title"><h2>Iliski haritasi</h2><button type="button" id="graph-close" class="pill glass small">Kapat</button></div>
+      <p class="meta">Dugumlere dokunarak kisiyi acin. Yalnizca iliskisi olan kisiler gosterilir.</p>
+      <div id="graph-box" class="graph-box"></div>
+    </div>
+  </dialog>
 
   <dialog id="view-dialog" class="sheet">
     <div id="view-body" class="sheet-body"></div>
