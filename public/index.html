@@ -82,20 +82,30 @@
     </div>
   </dialog>
 
-  <dialog id="graph-dialog" class="sheet">
+  <dialog id="graph-dialog" class="sheet graph-sheet">
+    <div class="sheet-body form">
+      <div class="graph-top">
+        <h2>Iliski haritasi</h2>
+        <button type="button" id="graph-close" class="pill glass small">Kapat</button>
+      </div>
+      <div id="graph-box" class="graph-box"></div>
+      <div class="graph-bar">
+        <button type="button" id="graph-menu-btn" class="pill glass" aria-label="Harita menusu">&#9776; Menu</button>
+        <span class="meta">Parmakla kaydir, iki parmakla buyut</span>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="graph-menu" class="sheet">
     <div class="sheet-body form">
       <div class="sheet-grip"></div>
-      <div class="section-title"><h2>Iliski haritasi</h2><button type="button" id="graph-close" class="pill glass small">Kapat</button></div>
-      <p class="meta">Dugumlere dokunarak kisiyi acin. Yalnizca iliskisi olan kisiler gosterilir.</p>
-      <div id="graph-box" class="graph-box"></div>
-      <div id="graph-controls" class="graph-controls">
-        <button type="button" class="pill glass small" data-g="in" aria-label="Yakinlastir">+</button>
-        <button type="button" class="pill glass small" data-g="out" aria-label="Uzaklastir">&minus;</button>
-        <button type="button" class="pill glass small" data-g="reset">Sifirla</button>
-        <button type="button" class="pill glass small" data-g="left" aria-label="Sola">&larr;</button>
-        <button type="button" class="pill glass small" data-g="up" aria-label="Yukari">&uarr;</button>
-        <button type="button" class="pill glass small" data-g="down" aria-label="Asagi">&darr;</button>
-        <button type="button" class="pill glass small" data-g="right" aria-label="Saga">&rarr;</button>
+      <h2>Harita ayarlari</h2>
+      <div class="graph-menu-list">
+        <button type="button" class="glass" data-g="in">Yakinlastir</button>
+        <button type="button" class="glass" data-g="out">Uzaklastir</button>
+        <button type="button" class="glass" data-g="reset">Tam gorunum</button>
+        <button type="button" class="glass" data-g="labels" id="menu-labels">Etiketleri goster</button>
+        <button type="button" class="glass" data-g="lock" id="menu-lock">Haritayi kilitle</button>
       </div>
     </div>
   </dialog>

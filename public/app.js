@@ -1028,12 +1028,15 @@ $('#summary-close').addEventListener('click', () => $('#summary-dialog').close()
 
 // Iliskisi olan kisilerden SVG agi. Iliski yoksa null doner.
 const GRAPH_SIZE = 600;
-let graphW = GRAPH_SIZE;                         // tam gorunumun birim genisligi
-let gv = { x: 0, y: 0, w: GRAPH_SIZE, h: GRAPH_SIZE }; // mevcut gorunum (viewBox)
-let graphDrag = null;
-let graphMoved = false;
+let graphW = GRAPH_SIZE;
+let gv = { x: 0, y: 0, w: GRAPH_SIZE, h: GRAPH_SIZE }; // gorunum (viewBox)
+let graphLocked = false;   // kilitliyken dokunma/tekerlek ile hareket kapali
+let graphLabels = null;    // null: yakinlasinca otomatik, true/false: elle
+const gPointers = new Map();
+let gPinch = null;
+let gDist = 0;             // toplam hareket (tiklama ile surukleme ayrimi)
+let gMoved = false;
 
-// Halka duzeni: kisi sayisi arttikca yeni halkalar eklenir, dugumler ust uste binmez
 function ringLayout(n) {
   const pts = [];
   let left = n, r = 60, ring = 0;
@@ -1063,7 +1066,7 @@ function graphSvg(all) {
   const edges = [];
   for (const n of nodes) {
     for (const r of n.relations) {
-      if (r.owner !== n.id || !pos.has(r.to)) continue; // her iliski bir kez cizilir
+      if (r.owner !== n.id || !pos.has(r.to)) continue;
       edges.push({ a: pos.get(n.id), b: pos.get(r.to), label: r.label });
     }
   }
@@ -1081,15 +1084,29 @@ function graphSvg(all) {
   return `<svg viewBox="0 0 ${graphW} ${graphW}" role="img" aria-label="Iliski haritasi">${svgEdges}${svgNodes}</svg>`;
 }
 
+function graphLabelsOn() {
+  return graphLabels === null ? gv.w <= graphW * 0.55 : graphLabels;
+}
+
 function applyGraphView() {
   const svg = document.querySelector('#graph-box svg');
   if (!svg) return;
   svg.setAttribute('viewBox', `${gv.x} ${gv.y} ${gv.w} ${gv.h}`);
-  svg.classList.toggle('show-labels', gv.w <= graphW * 0.55); // yakinlasinca etiketler gorunur
+  svg.classList.toggle('show-labels', graphLabelsOn());
+}
+
+// Ekran noktasini harita koordinatina cevirir
+function gScreenToSvg(clientX, clientY) {
+  const svg = document.querySelector('#graph-box svg');
+  const rect = svg.getBoundingClientRect();
+  return {
+    x: gv.x + ((clientX - rect.left) / rect.width) * gv.w,
+    y: gv.y + ((clientY - rect.top) / rect.height) * gv.h,
+  };
 }
 
 function zoomAt(factor, cx, cy) {
-  const nw = Math.min(graphW * 1.1, Math.max(graphW * 0.08, gv.w * factor));
+  const nw = Math.min(graphW * 1.1, Math.max(graphW * 0.06, gv.w * factor));
   const ax = (cx - gv.x) / gv.w, ay = (cy - gv.y) / gv.h;
   gv = { x: cx - ax * nw, y: cy - ay * nw, w: nw, h: nw };
   applyGraphView();
@@ -1099,75 +1116,114 @@ function zoomGraph(factor) {
   zoomAt(factor, gv.x + gv.w / 2, gv.y + gv.h / 2);
 }
 
-function panGraph(dx, dy) { // gorunum genisliginin orani kadar kaydirir
-  gv = { ...gv, x: gv.x + dx * gv.w, y: gv.y + dy * gv.h };
-  applyGraphView();
-}
-
 function resetGraphView() {
   gv = { x: 0, y: 0, w: graphW, h: graphW };
   applyGraphView();
+}
+
+function refreshGraphMenu() {
+  $('#menu-lock').textContent = graphLocked ? 'Haritayi ac' : 'Haritayi kilitle';
+  $('#menu-labels').textContent = graphLabelsOn() ? 'Etiketleri gizle' : 'Etiketleri goster';
 }
 
 function openGraph() {
   const svg = graphSvg(buildViews());
   if (!svg) { alert('Henuz iliski yok.'); return; }
   $('#graph-box').innerHTML = svg;
+  $('#graph-box').classList.toggle('locked', graphLocked);
   applyGraphView();
+  refreshGraphMenu();
+  document.body.style.overflow = 'hidden'; // sayfa arkada kaymasin
   $('#graph-dialog').showModal();
 }
 
 $('#graph-btn').addEventListener('click', openGraph);
 $('#graph-close').addEventListener('click', () => $('#graph-dialog').close());
+$('#graph-dialog').addEventListener('close', () => { document.body.style.overflow = ''; });
 
-// Mouse tekerlegi ile imlec noktasina yakinlastirma
-$('#graph-box').addEventListener('wheel', (e) => {
-  const svg = document.querySelector('#graph-box svg');
-  if (!svg) return;
+const gBox = $('#graph-box');
+
+// Tekerlek ile imlec noktasina yakinlastirma (masaustu)
+gBox.addEventListener('wheel', (e) => {
+  if (graphLocked || !document.querySelector('#graph-box svg')) return;
   e.preventDefault();
-  const rect = svg.getBoundingClientRect();
-  const cx = gv.x + ((e.clientX - rect.left) / rect.width) * gv.w;
-  const cy = gv.y + ((e.clientY - rect.top) / rect.height) * gv.h;
-  zoomAt(e.deltaY > 0 ? 1.15 : 1 / 1.15, cx, cy);
+  const p = gScreenToSvg(e.clientX, e.clientY);
+  zoomAt(e.deltaY > 0 ? 1.15 : 1 / 1.15, p.x, p.y);
 }, { passive: false });
 
-// Surukleyerek kaydirma (dokunmatik ve mouse)
-$('#graph-box').addEventListener('pointerdown', (e) => {
-  graphDrag = { x: e.clientX, y: e.clientY };
-  graphMoved = false;
-  e.currentTarget.setPointerCapture(e.pointerId);
+gBox.addEventListener('pointerdown', (e) => {
+  gBox.setPointerCapture(e.pointerId);
+  gPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  gMoved = false;
+  gDist = 0;
+  if (gPointers.size === 2) {
+    const [a, b] = [...gPointers.values()];
+    gPinch = { dist: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+  }
 });
-$('#graph-box').addEventListener('pointermove', (e) => {
+
+gBox.addEventListener('pointermove', (e) => {
+  if (!gPointers.has(e.pointerId) || graphLocked) return;
+  const prev = gPointers.get(e.pointerId);
+  gPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   const svg = document.querySelector('#graph-box svg');
-  if (!graphDrag || !svg) return;
-  const dxp = e.clientX - graphDrag.x, dyp = e.clientY - graphDrag.y;
-  graphDrag = { x: e.clientX, y: e.clientY };
-  if (Math.abs(dxp) + Math.abs(dyp) > 6) graphMoved = true;
+  if (!svg) return;
   const rect = svg.getBoundingClientRect();
-  gv = { ...gv, x: gv.x - dxp * (gv.w / rect.width), y: gv.y - dyp * (gv.h / rect.height) };
+
+  if (gPointers.size >= 2 && gPinch) {
+    // Iki parmak: yakinlastir/uzaklastir + orta noktayla kaydir
+    const [a, b] = [...gPointers.values()];
+    const dist = Math.hypot(a.x - b.x, a.y - b.y);
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    if (dist > 0 && gPinch.dist > 0) {
+      const p = gScreenToSvg(mx, my);
+      zoomAt(gPinch.dist / dist, p.x, p.y);
+    }
+    gv = { ...gv, x: gv.x - (mx - gPinch.mx) * (gv.w / rect.width), y: gv.y - (my - gPinch.my) * (gv.h / rect.height) };
+    applyGraphView();
+    gPinch = { dist, mx, my };
+    gMoved = true;
+    return;
+  }
+
+  // Tek parmak: kaydir
+  const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
+  gDist += Math.abs(dx) + Math.abs(dy);
+  if (gDist > 8) gMoved = true;
+  gv = { ...gv, x: gv.x - dx * (gv.w / rect.width), y: gv.y - dy * (gv.h / rect.height) };
   applyGraphView();
 });
-$('#graph-box').addEventListener('pointerup', () => { graphDrag = null; });
-$('#graph-box').addEventListener('pointercancel', () => { graphDrag = null; });
 
-// Surukleme bittiyse tiklama sayilmaz; dugume tiklaninca kisi acilir
-$('#graph-box').addEventListener('click', (e) => {
-  if (graphMoved) return;
+const gEnd = (e) => {
+  gPointers.delete(e.pointerId);
+  if (gPointers.size < 2) gPinch = null;
+};
+gBox.addEventListener('pointerup', gEnd);
+gBox.addEventListener('pointercancel', gEnd);
+
+// Kaydirma/yakinlastirma olmadiysa dugume dokunmak kisiyi acar
+gBox.addEventListener('click', (e) => {
+  if (gMoved) return;
   const id = Number(e.target.closest('.node')?.dataset.id);
   if (!id) return;
   $('#graph-dialog').close();
   openView(id);
 });
 
-$('#graph-controls').addEventListener('click', (e) => {
+// Alt bar menusu (hamburger)
+$('#graph-menu-btn').addEventListener('click', () => {
+  refreshGraphMenu();
+  $('#graph-menu').showModal();
+});
+$('#graph-menu').addEventListener('click', (e) => {
   const act = e.target.closest('[data-g]')?.dataset.g;
+  if (!act) return;
   if (act === 'in') zoomGraph(1 / 1.4);
   if (act === 'out') zoomGraph(1.4);
   if (act === 'reset') resetGraphView();
-  if (act === 'left') panGraph(-0.2, 0);
-  if (act === 'right') panGraph(0.2, 0);
-  if (act === 'up') panGraph(0, -0.2);
-  if (act === 'down') panGraph(0, 0.2);
+  if (act === 'labels') { graphLabels = !graphLabelsOn(); applyGraphView(); }
+  if (act === 'lock') { graphLocked = !graphLocked; gBox.classList.toggle('locked', graphLocked); }
+  $('#graph-menu').close();
 });
 
 function applyTheme(theme) {

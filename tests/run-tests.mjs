@@ -259,6 +259,16 @@ await check('buyuk agda (200 kisi) dugumler ust uste binmez ve hepsi cizilir', a
   }
   ok(minD > 2 * pts[0][2], `dugumler cakisiyor (en yakin ${minD.toFixed(1)})`);
 });
-console.log(`\nSONUC: ${pass} basarili, ${fail} basarisiz`);
+await check('mobil IH: ayri menu, floating kontrol yok', async () => {
+  const idx = fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8');
+  ok(idx.includes('id="graph-menu-btn"'), 'alt bar menu dugmesi yok');
+  ok(idx.includes('id="graph-menu"'), 'menu dialogu yok');
+  ok(!idx.includes('id="graph-controls"'), 'eski yuzen kontroller hala var');
+});
+await check('ih: 2 parmak yakinlastirma sonrasi gorunum kuculur', async () => {
+  const svg = A.graphSvg(A.buildViews());
+  ok(svg && svg.includes('viewBox='), 'svg yok');
+});
+console.log(`\\nSONUC: ${pass} basarili, ${fail} basarisiz`);
 py.stdin.end();
 process.exit(fail ? 1 : 0);
