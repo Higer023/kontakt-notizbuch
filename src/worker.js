@@ -84,6 +84,7 @@ async function handleApi(request, env, url) {
     }
   }
 
+  await migrateSecurity(env);
   if (await isBlocked(env, ip)) throw new HttpError(403, 'Bu adres engellendi');
   await rateLimit(env, ip);
 
@@ -98,8 +99,15 @@ async function handleApi(request, env, url) {
 
   if (pathname === '/api/reauth' && method === 'POST') return reauth(request, env, ip, session);
   if (pathname === '/api/me' && method === 'GET') return json({ ok: true });
-  if (pathname === '/api/logs' && method === 'GET') return listLogs(env, url);
-  if (pathname === '/api/security' && method === 'GET') return securityOverview(env);
+  // Kayitlar ve IP listesi sifreli: okumak icin yeniden parola gerekir
+  if (pathname === '/api/logs' && method === 'GET') {
+    requireFresh();
+    return listLogs(env, url);
+  }
+  if (pathname === '/api/security' && method === 'GET') {
+    requireFresh();
+    return securityOverview(env);
+  }
   if (pathname === '/api/blocks' && method === 'POST') {
     requireFresh();
     return blockIp(request, env, ip);
@@ -243,9 +251,106 @@ async function vaultImport(request, env) {
   return json({ imported: records.length, done: body.final === true }, 201);
 }
 
+// ---------- Giris kayitlari: sunucu anahtariyla sifreli, IP icin geri okunamaz arama kodu ----------
+// LOG_KEY (Worker secret) -> HKDF ile sifreleme anahtari ve arama kodu anahtari turetilir.
+
+let logKeyCache = null;
+
+async function logKeys(env) {
+  if (!env.LOG_KEY) throw new HttpError(500, 'Kayit anahtari yapilandirilmamis');
+  if (logKeyCache) return logKeyCache;
+  const master = await crypto.subtle.importKey('raw', unb64(env.LOG_KEY), 'HKDF', false, ['deriveKey', 'deriveBits']);
+  const enc = await crypto.subtle.deriveKey(
+    { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: new TextEncoder().encode('log-enc') },
+    master, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
+  );
+  const macBits = await crypto.subtle.deriveBits(
+    { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: new TextEncoder().encode('log-idx') }, master, 256
+  );
+  const mac = await crypto.subtle.importKey('raw', macBits, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  logKeyCache = { enc, mac };
+  return logKeyCache;
+}
+
+async function ipIndex(env, ip) {
+  const { mac } = await logKeys(env);
+  const sig = await crypto.subtle.sign('HMAC', mac, new TextEncoder().encode(String(ip)));
+  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function sealLog(env, obj) {
+  const { enc } = await logKeys(env);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, enc, new TextEncoder().encode(JSON.stringify(obj)));
+  return JSON.stringify({ v: 1, iv: b64(iv), ct: b64(ct) });
+}
+
+async function openLog(env, sealed) {
+  if (!sealed) return {};
+  const { enc } = await logKeys(env);
+  const { iv, ct } = JSON.parse(sealed);
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(iv) }, enc, unb64(ct));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+// Eski duz metin giris ve engel kayitlarini sifreli tablolara tasir, eski tablolari siler.
+// Tek seferlik; islem tek batch icinde (ya hepsi ya hicbiri).
+async function migrateSecurity(env) {
+  const done = await env.DB.prepare("SELECT name FROM migrations WHERE name = 'logs_v2'").first();
+  if (!done) {
+    const stmts = [];
+    const hasLogs = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'login_logs'").first();
+    if (hasLogs) {
+      const { results: rows } = await env.DB.prepare(
+        'SELECT ip, success, event, user_agent, fingerprint, created_at FROM login_logs ORDER BY id'
+      ).all();
+      for (const r of rows) {
+        const sealed = await sealLog(env, { ip: r.ip, user_agent: r.user_agent, fingerprint: parseJsonSafe(r.fingerprint) });
+        stmts.push(env.DB.prepare(
+          'INSERT INTO login_logs_v2 (idx, success, event, sealed, created_at) VALUES (?, ?, ?, ?, ?)'
+        ).bind(await ipIndex(env, r.ip), r.success, r.event, sealed, r.created_at));
+      }
+      stmts.push(env.DB.prepare('DROP TABLE login_logs'));
+    }
+    const hasBlocked = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'blocked_ips'").first();
+    if (hasBlocked) {
+      const { results: bl } = await env.DB.prepare('SELECT ip, created_at FROM blocked_ips').all();
+      for (const b of bl) {
+        stmts.push(env.DB.prepare(
+          'INSERT OR IGNORE INTO blocked_ips_v2 (idx, sealed, created_at) VALUES (?, ?, ?)'
+        ).bind(await ipIndex(env, b.ip), await sealLog(env, { ip: b.ip }), b.created_at));
+      }
+      stmts.push(env.DB.prepare('DROP TABLE blocked_ips'));
+    }
+    stmts.push(env.DB.prepare("INSERT OR IGNORE INTO migrations (name) VALUES ('logs_v2')"));
+    await env.DB.batch(stmts);
+  }
+  await dropLegacyContacts(env);
+}
+
+// Eski duz metin kisi tablolari: yalnizca her kisinin sifreli karsiligi varsa silinir
+async function dropLegacyContacts(env) {
+  const done = await env.DB.prepare("SELECT name FROM migrations WHERE name = 'legacy_drop'").first();
+  if (done) return;
+  const hasContacts = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'contacts'").first();
+  if (!hasContacts) {
+    await env.DB.prepare("INSERT OR IGNORE INTO migrations (name) VALUES ('legacy_drop')").run();
+    return;
+  }
+  const missing = await env.DB.prepare(
+    'SELECT COUNT(*) AS n FROM contacts WHERE id NOT IN (SELECT id FROM encrypted_contacts)'
+  ).first();
+  if (missing.n > 0) return; // sifreli karsiligi olmayan kayit varsa hicbir sey silinmez
+  await env.DB.batch([
+    env.DB.prepare('DROP TABLE IF EXISTS relations'),
+    env.DB.prepare('DROP TABLE IF EXISTS contacts'),
+    env.DB.prepare("INSERT OR IGNORE INTO migrations (name) VALUES ('legacy_drop')"),
+  ]);
+}
+
 async function rateLimit(env, ip) {
   const minute = Math.floor(Date.now() / 60000);
-  const key = `${ip}:${minute}`;
+  const key = `${await ipIndex(env, ip)}:${minute}`;
   await env.DB.prepare(
     'INSERT INTO rate_limits (key, hits, window) VALUES (?, 1, ?) ON CONFLICT(key) DO UPDATE SET hits = hits + 1'
   ).bind(key, minute).run();
@@ -257,7 +362,7 @@ async function rateLimit(env, ip) {
 }
 
 async function isBlocked(env, ip) {
-  const row = await env.DB.prepare('SELECT ip FROM blocked_ips WHERE ip = ?').bind(ip).first();
+  const row = await env.DB.prepare('SELECT idx FROM blocked_ips_v2 WHERE idx = ?').bind(await ipIndex(env, ip)).first();
   return !!row;
 }
 
@@ -292,15 +397,16 @@ function footprintJson(request, clientFp) {
 
 async function recordFootprint(env, request, ip, event, success, clientFp) {
   const ua = (request.headers.get('User-Agent') || '').slice(0, 300);
+  const sealed = await sealLog(env, { ip, user_agent: ua, fingerprint: parseJsonSafe(footprintJson(request, clientFp)) });
   await env.DB.prepare(
-    'INSERT INTO login_logs (ip, success, event, user_agent, fingerprint) VALUES (?, ?, ?, ?, ?)'
-  ).bind(ip, success ? 1 : 0, event, ua, footprintJson(request, clientFp)).run();
+    'INSERT INTO login_logs_v2 (idx, success, event, sealed) VALUES (?, ?, ?, ?)'
+  ).bind(await ipIndex(env, ip), success ? 1 : 0, event, sealed).run();
 }
 
 async function recentFailCount(env, ip) {
   const row = await env.DB.prepare(
-    "SELECT COUNT(*) AS n FROM login_logs WHERE ip = ? AND success = 0 AND created_at > datetime('now', ?)"
-  ).bind(ip, `-${LOCK_MINUTES} minutes`).first();
+    "SELECT COUNT(*) AS n FROM login_logs_v2 WHERE idx = ? AND success = 0 AND created_at > datetime('now', ?)"
+  ).bind(await ipIndex(env, ip), `-${LOCK_MINUTES} minutes`).first();
   return row.n;
 }
 
@@ -405,29 +511,46 @@ function parseJsonSafe(text) {
 async function listLogs(env, url) {
   const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 40, 1), 200);
   const { results } = await env.DB.prepare(
-    'SELECT id, ip, success, event, user_agent, fingerprint, created_at FROM login_logs ORDER BY id DESC LIMIT ?'
+    'SELECT id, success, event, sealed, created_at FROM login_logs_v2 ORDER BY id DESC LIMIT ?'
   ).bind(limit).all();
-  return json({
-    logs: results.map((r) => ({ ...r, fingerprint: parseJsonSafe(r.fingerprint) })),
-  });
+  const logs = [];
+  for (const r of results) {
+    const d = await openLog(env, r.sealed);
+    logs.push({
+      id: r.id, ip: d.ip, success: r.success, event: r.event,
+      user_agent: d.user_agent, fingerprint: d.fingerprint ?? null, created_at: r.created_at,
+    });
+  }
+  return json({ logs });
 }
 
 async function securityOverview(env) {
-  const { results: ips } = await env.DB.prepare(
-    `SELECT l.ip, COUNT(*) AS total,
+  const { results: groups } = await env.DB.prepare(
+    `SELECT l.idx, COUNT(*) AS total,
             SUM(CASE WHEN l.success = 0 THEN 1 ELSE 0 END) AS fails,
             MAX(l.created_at) AS last_at,
-            (SELECT 1 FROM blocked_ips b WHERE b.ip = l.ip) AS blocked
-     FROM login_logs l GROUP BY l.ip ORDER BY last_at DESC LIMIT 100`
+            (SELECT 1 FROM blocked_ips_v2 b WHERE b.idx = l.idx) AS blocked
+     FROM login_logs_v2 l GROUP BY l.idx ORDER BY last_at DESC LIMIT 100`
   ).all();
-  const { results: blocked } = await env.DB.prepare(
-    'SELECT ip, created_at FROM blocked_ips ORDER BY created_at DESC'
+  const ips = [];
+  for (const g of groups) {
+    const sample = await env.DB.prepare('SELECT sealed FROM login_logs_v2 WHERE idx = ? LIMIT 1').bind(g.idx).first();
+    const d = await openLog(env, sample.sealed);
+    ips.push({ ip: d.ip, total: g.total, fails: g.fails, last_at: g.last_at, blocked: !!g.blocked });
+  }
+  const { results: bl } = await env.DB.prepare(
+    'SELECT sealed, created_at FROM blocked_ips_v2 ORDER BY created_at DESC'
   ).all();
+  const blocked = [];
+  for (const b of bl) {
+    const d = await openLog(env, b.sealed);
+    blocked.push({ ip: d.ip, created_at: b.created_at });
+  }
   const totals = await env.DB.prepare(
-    'SELECT COUNT(*) AS total, SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) AS fails FROM login_logs'
+    'SELECT COUNT(*) AS total, SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) AS fails FROM login_logs_v2'
   ).first();
   return json({
-    ips: ips.map((r) => ({ ...r, blocked: !!r.blocked })),
+    ips,
     blocked,
     totals: { total: totals.total || 0, fails: totals.fails || 0, blocked: blocked.length },
   });
@@ -438,14 +561,15 @@ async function blockIp(request, env, ownIp) {
   const ip = typeof body.ip === 'string' ? body.ip.trim() : '';
   if (!ip || ip.length > 64) throw new HttpError(400, 'Gecersiz IP adresi');
   if (ip === ownIp) throw new HttpError(400, 'Kendi IP adresinizi engelleyemezsiniz');
-  await env.DB.prepare('INSERT OR IGNORE INTO blocked_ips (ip) VALUES (?)').bind(ip).run();
+  await env.DB.prepare('INSERT OR IGNORE INTO blocked_ips_v2 (idx, sealed) VALUES (?, ?)')
+    .bind(await ipIndex(env, ip), await sealLog(env, { ip })).run();
   return json({ ok: true }, 201);
 }
 
 async function unblockIp(env, url) {
   const ip = (url.searchParams.get('ip') || '').trim();
   if (!ip) throw new HttpError(400, 'IP gerekli');
-  await env.DB.prepare('DELETE FROM blocked_ips WHERE ip = ?').bind(ip).run();
+  await env.DB.prepare('DELETE FROM blocked_ips_v2 WHERE idx = ?').bind(await ipIndex(env, ip)).run();
   return json({ ok: true });
 }
 

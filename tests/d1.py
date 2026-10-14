@@ -3,6 +3,7 @@ import sys, json, sqlite3
 db = sqlite3.connect(':memory:', isolation_level=None)
 import os
 HERE = os.path.dirname(os.path.abspath(__file__))
+db.executescript(open(os.path.join(HERE, 'legacy-schema.sql')).read())
 db.executescript(open(os.path.join(HERE, '..', 'schema.sql')).read())
 def run(sql, args, mode):
     cur = db.execute(sql, args)

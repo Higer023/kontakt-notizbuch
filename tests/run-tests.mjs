@@ -44,6 +44,10 @@ const DB = {
   },
 };
 
+await DB.prepare("INSERT INTO login_logs (ip, success, event, user_agent, fingerprint) VALUES ('9.9.9.9', 1, 'login', 'ua-test', '{\"lang\":\"tr\"}')").bind().run();
+await DB.prepare("INSERT INTO login_logs (ip, success, event, user_agent, fingerprint) VALUES ('9.9.9.9', 0, 'login', 'ua-test', NULL)").bind().run();
+await DB.prepare("INSERT INTO blocked_ips (ip) VALUES ('8.8.8.8')").bind().run();
+
 // ---- Sonuc takibi ----
 let pass = 0, fail = 0;
 async function check(name, fn) {
@@ -56,7 +60,7 @@ const ok = (c, msg) => { if (!c) throw new Error(msg || 'kosul saglanmadi'); };
 // ---- Worker ----
 const workerSrc = fs.readFileSync(path.join(ROOT, 'src', 'worker.js'), 'utf8');
 const worker = (await import('data:text/javascript,' + encodeURIComponent(workerSrc))).default;
-const env = { DB, TURNSTILE_SECRET: 'test', ASSETS: { fetch: async () => new Response('x') } };
+const env = { DB, TURNSTILE_SECRET: 'test', LOG_KEY: crypto.randomBytes(32).toString('base64'), ASSETS: { fetch: async () => new Response('x') } };
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
 await DB.prepare("INSERT INTO sessions (token_hash, expires_at, reauth_until) VALUES (?, datetime('now','+1 hour'), datetime('now','+5 minutes'))").bind(sha('tok1')).run();
@@ -330,6 +334,47 @@ await check('IH yazilari: 60 kisilik yogun agda ust uste binmez', async () => {
     v[a-1].relations.push({ owner: a, to: b, label: l }); v[b-1].relations.push({ owner: a, to: b, label: l });
   }
   assertNoTextOverlap(A.graphSvg(v));
+});
+async function callIp(method, path, body, token, ip) {
+  const headers = { 'CF-Connecting-IP': ip };
+  if (token) headers['Cookie'] = `session=${token}`;
+  let reqBody;
+  if (body !== undefined) { headers['Content-Type'] = 'application/json'; reqBody = JSON.stringify(body); }
+  const res = await worker.fetch(new Request('https://t.example' + path, { method, headers, body: reqBody }), env);
+  let json = null; try { json = JSON.parse(await res.text()); } catch {}
+  return { status: res.status, json };
+}
+await check('giris kayitlari: eski tablolar silindi, veri sifreli tasindi', async () => {
+  const left = (await DB.prepare("SELECT name FROM sqlite_master WHERE name IN ('login_logs','blocked_ips','contacts','relations')").all()).results;
+  eq(left.length, 0, 'eski tablolar hala var');
+  const rows = (await DB.prepare('SELECT idx, sealed FROM login_logs_v2').all()).results;
+  eq(rows.length, 2, 'v2 kayit sayisi');
+  for (const r of rows) {
+    ok(!r.sealed.includes('9.9.9.9') && r.idx !== '9.9.9.9', 'IP duz metin sizdi');
+  }
+});
+await check('kayitlar: parola olmadan okunamaz (428)', async () => eq((await call('GET', '/api/logs', undefined, 'tok2')).status, 428));
+await check('kayitlar: parola ile okunur, IP ve tarayici geri gelir', async () => {
+  const r = await call('GET', '/api/logs', undefined, 'tok1');
+  eq(r.status, 200);
+  const ok1 = r.json.logs.find((l) => l.ip === '9.9.9.9' && l.success === 1);
+  ok(ok1, 'IP cozulmedi');
+  eq(ok1.user_agent, 'ua-test'); eq(ok1.fingerprint, { lang: 'tr' });
+});
+await check('guvenlik paneli: sifreli IP listesi ve engelli IP', async () => {
+  eq((await call('GET', '/api/security', undefined, 'tok2')).status, 428);
+  const r = await call('GET', '/api/security', undefined, 'tok1');
+  const ip = r.json.ips.find((i) => i.ip === '9.9.9.9');
+  ok(ip && ip.total === 2 && ip.fails === 1, 'IP ozeti yanlis');
+  ok(r.json.blocked.some((b) => b.ip === '8.8.8.8'), 'engelli IP cozulmedi');
+});
+await check('engelleme: seed edilen IP 403 alir', async () =>
+  eq((await callIp('GET', '/api/me', undefined, 'tok1', '8.8.8.8')).status, 403));
+await check('engelleme: yeni IP engellenir, kaldirilinca acilir', async () => {
+  eq((await call('POST', '/api/blocks', { ip: '7.7.7.7' }, 'tok1')).status, 201);
+  eq((await callIp('GET', '/api/me', undefined, 'tok1', '7.7.7.7')).status, 403);
+  eq((await call('DELETE', '/api/blocks?ip=7.7.7.7', undefined, 'tok1')).status, 200);
+  eq((await callIp('GET', '/api/me', undefined, 'tok1', '7.7.7.7')).status, 200);
 });
 console.log(`\\nSONUC: ${pass} basarili, ${fail} basarisiz`);
 py.stdin.end();
