@@ -211,6 +211,8 @@ async function idleLogout() {
 
 function showLogin(message = '') {
   stopIdle();
+  Vault.lock();
+  records.clear();
   window.turnstile?.reset();
   $('#app-view').classList.add('hidden');
   $('#login-view').classList.remove('hidden');
@@ -234,10 +236,12 @@ $('#login-form').addEventListener('submit', async (e) => {
     const fp = await getFingerprint(geo);
     const turnstile = window.turnstile ? window.turnstile.getResponse() : '';
     if (!turnstile) throw new Error('Lutfen dogrulamayi tamamlayin.');
+    const password = $('#password').value;
     await api('/api/login', {
       method: 'POST',
-      body: { username: $('#username').value, password: $('#password').value, fp, turnstile },
+      body: { username: $('#username').value, password, fp, turnstile },
     });
+    await unlockVault(password);
     $('#login-error').textContent = '';
     showApp();
   } catch (err) {
@@ -267,24 +271,278 @@ function switchTab(tab) {
   window.scrollTo({ top: 0 });
 }
 
+// ---------- Sifreli veri (tarayicida cozulur) ----------
+
+const SOCIAL_URL = {
+  instagram: (u) => `https://instagram.com/${u}`, x: (u) => `https://x.com/${u}`,
+  twitter: (u) => `https://x.com/${u}`, linkedin: (u) => `https://www.linkedin.com/in/${u}`,
+  facebook: (u) => `https://facebook.com/${u}`, github: (u) => `https://github.com/${u}`,
+  tiktok: (u) => `https://www.tiktok.com/@${u}`, youtube: (u) => `https://www.youtube.com/@${u}`,
+  snapchat: (u) => `https://www.snapchat.com/add/${u}`, whatsapp: (u) => `https://wa.me/${u}`,
+  telegram: (u) => `https://t.me/${u}`, pinterest: (u) => `https://www.pinterest.com/${u}`,
+  reddit: (u) => `https://www.reddit.com/user/${u}`, twitch: (u) => `https://www.twitch.tv/${u}`,
+  threads: (u) => `https://www.threads.net/@${u}`, bluesky: (u) => `https://bsky.app/profile/${u}`,
+  medium: (u) => `https://medium.com/@${u}`,
+};
+const SOCIAL_SLUG = {
+  instagram: 'instagram', x: 'x', twitter: 'x', linkedin: 'linkedin', facebook: 'facebook', github: 'github',
+  tiktok: 'tiktok', youtube: 'youtube', snapchat: 'snapchat', whatsapp: 'whatsapp', telegram: 'telegram',
+  pinterest: 'pinterest', reddit: 'reddit', twitch: 'twitch', threads: 'threads', bluesky: 'bluesky', medium: 'medium',
+};
+const USER_RE = /^[A-Za-z0-9._-]{1,100}$/;
+const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/;
+const PHONE_RE = /^[+0-9 ()-]{0,30}$/;
+
+// Cozulmus kayitlar: id -> { id, data }. Sunucu bu veriyi gormez.
+const records = new Map();
+
+function parseArr(s) {
+  try { const v = JSON.parse(s || '[]'); return Array.isArray(v) ? v : []; } catch { return []; }
+}
+
+function legacyToData(row, rels) {
+  return {
+    first_name: row.first_name, last_name: row.last_name, nickname: row.nickname,
+    birth_year: row.birth_year, birth_month: row.birth_month, birth_day: row.birth_day,
+    birthplace: row.birthplace, city: row.city, school: row.school, group_name: row.group_name,
+    occupation: row.occupation, how_we_met: row.how_we_met, phone: row.phone, email: row.email,
+    website: row.website, socials: parseArr(row.socials), extra: parseArr(row.extra),
+    notes: row.notes, tags: row.tags, relations: rels,
+  };
+}
+
+function buildFormData(form) {
+  const num = (v) => (v === '' ? null : Number(v));
+  const str = (v, max) => (v || '').trim().slice(0, max) || null;
+  const socials = [...$('#socials-list').querySelectorAll('.social-row')]
+    .map((row) => {
+      const platform = row.querySelector('select').value;
+      let username = row.querySelector('input').value.trim().replace(/^@/, '');
+      if (platform === 'whatsapp') username = username.replace(/\D/g, '');
+      return { platform, username };
+    })
+    .filter((s) => s.username);
+  const extra = [...$('#extra-list').querySelectorAll('.extra-row')]
+    .map((row) => {
+      const [l, v] = row.querySelectorAll('input');
+      return { label: l.value.trim().slice(0, 40), value: v.value.trim().slice(0, 300) };
+    })
+    .filter((x) => x.label && x.value);
+  return {
+    first_name: str(form.elements.first_name.value, 100),
+    last_name: str(form.elements.last_name.value, 100),
+    nickname: str(form.elements.nickname.value, 60),
+    birth_year: num(form.elements.birth_year.value),
+    birth_month: num(form.elements.birth_month.value),
+    birth_day: num(form.elements.birth_day.value),
+    birthplace: str(form.elements.birthplace.value, 100),
+    city: str(form.elements.city.value, 100),
+    school: str(form.elements.school.value, 120),
+    group_name: str(form.elements.group_name.value, 60),
+    occupation: str(form.elements.occupation.value, 100),
+    how_we_met: str(form.elements.how_we_met.value, 500),
+    phone: str(form.elements.phone.value, 30),
+    email: str(form.elements.email.value, 254),
+    website: str(form.elements.website.value, 300),
+    socials, extra,
+    notes: str(form.elements.notes.value, 5000),
+    tags: str(form.elements.tags.value, 300),
+  };
+}
+
+function validate(d) {
+  if (!d.first_name) throw new Error('Isim zorunludur');
+  if (d.email && !EMAIL_RE.test(d.email)) throw new Error('Gecersiz e-posta');
+  if (d.phone && !PHONE_RE.test(d.phone)) throw new Error('Gecersiz telefon');
+  if (d.website) {
+    try {
+      const u = new URL(d.website);
+      if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new Error('x');
+    } catch { throw new Error('Gecersiz web sitesi (http/https ile baslamali)'); }
+  }
+  const thisYear = new Date().getFullYear();
+  if (d.birth_year !== null && (!Number.isInteger(d.birth_year) || d.birth_year < 1900 || d.birth_year > thisYear)) throw new Error('Gecersiz dogum yili');
+  if (d.birth_month !== null && (!Number.isInteger(d.birth_month) || d.birth_month < 1 || d.birth_month > 12)) throw new Error('Gecersiz dogum ayi');
+  if (d.birth_day !== null && (!Number.isInteger(d.birth_day) || d.birth_day < 1 || d.birth_day > 31)) throw new Error('Gecersiz dogum gunu');
+  for (const s of d.socials) {
+    if (!SOCIAL_URL[s.platform]) throw new Error(`Desteklenmeyen hesap: ${s.platform}`);
+    const re = s.platform === 'whatsapp' ? /^\+?[0-9]{6,15}$/ : USER_RE;
+    if (!re.test(s.username)) throw new Error(`Gecersiz hesap bilgisi: ${s.platform}`);
+  }
+}
+
+function computeAge(d) {
+  if (!d.birth_year) return null;
+  const now = new Date();
+  let age = now.getFullYear() - d.birth_year;
+  if (d.birth_month) {
+    const m = now.getMonth() + 1;
+    const day = now.getDate();
+    if (m < d.birth_month || (m === d.birth_month && d.birth_day && day < d.birth_day)) age--;
+  }
+  return age;
+}
+
+// Gorunum modeli: iliskiler iki yonlu hesaplanir
+function buildViews() {
+  const views = new Map();
+  for (const rec of records.values()) {
+    const d = rec.data;
+    views.set(rec.id, {
+      id: rec.id, ...d,
+      socials: (d.socials || []).map((s) => ({
+        platform: s.platform, username: s.username,
+        url: SOCIAL_URL[s.platform] ? SOCIAL_URL[s.platform](encodeURIComponent(s.username)) : null,
+        icon: SOCIAL_SLUG[s.platform] ? `https://cdn.simpleicons.org/${SOCIAL_SLUG[s.platform]}` : null,
+      })),
+      extra: d.extra || [],
+      age: computeAge(d),
+      age_exact: !!(d.birth_year && d.birth_month && d.birth_day),
+      relations: [],
+    });
+  }
+  for (const rec of records.values()) {
+    for (const r of rec.data.relations || []) {
+      const src = views.get(rec.id);
+      const dst = views.get(r.to);
+      if (!src || !dst) continue;
+      const key = `${rec.id}|${r.to}|${r.label}`;
+      src.relations.push({ key, owner: rec.id, to: r.to, label: r.label, other_name: fullName(dst), role: r.label });
+      dst.relations.push({ key, owner: rec.id, to: r.to, label: r.label, other_name: fullName(src), role: r.reverse || r.label });
+    }
+  }
+  return [...views.values()].sort((a, b) =>
+    (a.first_name || '').localeCompare(b.first_name || '', 'tr', { sensitivity: 'base' })
+    || (a.last_name || '').localeCompare(b.last_name || '', 'tr', { sensitivity: 'base' }));
+}
+
+function viewById(id) {
+  return buildViews().find((c) => c.id === id);
+}
+
+// ---------- Sifre cozme, gecis, kayit ----------
+
+async function loadRecords() {
+  const { contacts: rows } = await api('/api/vault/contacts');
+  records.clear();
+  for (const row of rows) {
+    records.set(row.id, { id: row.id, data: await Vault.open(row.payload) });
+  }
+}
+
+// Eski duz metin kayitlari bir kez sifreleyip yazar (ids korunur)
+async function migrateLegacy() {
+  const legacy = await api('/api/vault/legacy');
+  const relsBy = new Map();
+  for (const r of legacy.relations) {
+    if (!relsBy.has(r.from_id)) relsBy.set(r.from_id, []);
+    relsBy.get(r.from_id).push({ to: r.to_id, label: r.label, reverse: r.reverse_label || '' });
+  }
+  const CHUNK = 20;
+  if (!legacy.contacts.length) {
+    await api('/api/vault/import', { method: 'POST', body: { records: [], final: true } });
+    return;
+  }
+  for (let i = 0; i < legacy.contacts.length; i += CHUNK) {
+    const slice = legacy.contacts.slice(i, i + CHUNK);
+    const payloads = [];
+    for (const row of slice) {
+      const data = legacyToData(row, relsBy.get(row.id) || []);
+      payloads.push({ id: row.id, payload: await Vault.seal(data) });
+    }
+    const final = i + CHUNK >= legacy.contacts.length;
+    await api('/api/vault/import', { method: 'POST', body: { records: payloads, final } });
+  }
+}
+
+async function unlockVault(password) {
+  const status = await api('/api/vault/status');
+  let salt = status.salt;
+  if (!salt) {
+    const init = await api('/api/vault/init', { method: 'POST', body: { salt: Vault.newSalt() } });
+    salt = init.salt;
+  }
+  await Vault.unlock(password, salt);
+  if (!status.migrated) await migrateLegacy();
+  try {
+    await loadRecords();
+  } catch {
+    Vault.lock();
+    throw new Error('Sifreli veriler acilamadi. Parolanizi kontrol edin.');
+  }
+}
+
+async function persist(id, data) {
+  const payload = await Vault.seal(data);
+  if (id) {
+    await api(`/api/vault/contacts/${id}`, { method: 'PUT', body: { payload } });
+    records.set(id, { id, data });
+    return id;
+  }
+  const res = await api('/api/vault/contacts', { method: 'POST', body: { payload } });
+  records.set(res.contact.id, { id: res.contact.id, data });
+  return res.contact.id;
+}
+
+async function deleteContactById(id) {
+  const puts = [];
+  const updates = [];
+  for (const rec of records.values()) {
+    if (rec.id === id) continue;
+    const rels = rec.data.relations || [];
+    const kept = rels.filter((r) => r.to !== id);
+    if (kept.length !== rels.length) {
+      const data = { ...rec.data, relations: kept };
+      puts.push({ id: rec.id, payload: await Vault.seal(data) });
+      updates.push({ id: rec.id, data });
+    }
+  }
+  await api('/api/vault/batch', { method: 'POST', body: { puts, deletes: [id] } });
+  records.delete(id);
+  for (const u of updates) records.set(u.id, u);
+}
+
+async function addRelations(fromId, toIds, label, reverse) {
+  const rec = records.get(fromId);
+  const rels = [...(rec.data.relations || [])];
+  let added = 0;
+  for (const to of toIds) {
+    if (to === fromId || !records.has(to)) continue;
+    if (rels.some((r) => r.to === to && r.label === label)) continue;
+    rels.push({ to, label, reverse: reverse || '' });
+    added++;
+  }
+  if (added) await persist(fromId, { ...rec.data, relations: rels });
+  return added;
+}
+
+async function removeRelation(entry) {
+  const rec = records.get(entry.owner);
+  if (!rec) return;
+  const rels = (rec.data.relations || []).filter((r) => !(r.to === entry.to && r.label === entry.label));
+  await persist(entry.owner, { ...rec.data, relations: rels });
+}
+
 // ---------- Kisiler ----------
 
 async function loadContacts() {
-  const q = $('#search').value.trim();
+  if (!Vault.isUnlocked()) throw new Error('Kasa kilitli');
+  const q = $('#search').value.trim().toLowerCase();
   const group = $('#group-filter').value;
-  const params = new URLSearchParams();
-  if (q) params.set('q', q);
-  if (group) params.set('group', group);
-  const data = await api(`/api/contacts?${params}`);
-  contacts = data.contacts;
-  renderGroups();
+  const all = buildViews();
+  renderGroups(all);
+  contacts = all
+    .filter((c) => !group || c.group_name === group)
+    .filter((c) => !q || [c.first_name, c.last_name, c.nickname, c.city, c.school, c.group_name, c.occupation, c.tags, c.email]
+      .filter(Boolean).join(' ').toLowerCase().includes(q))
+    .slice(0, 500);
   renderGrid();
 }
 
-function renderGroups() {
+function renderGroups(all) {
   const select = $('#group-filter');
   const current = select.value;
-  const groups = [...new Set(contacts.map((c) => c.group_name).filter(Boolean))].sort();
+  const groups = [...new Set(all.map((c) => c.group_name).filter(Boolean))].sort();
   if (current && !groups.includes(current)) groups.push(current);
   select.innerHTML = '<option value="">Tum gruplar</option>' +
     groups.map((g) => `<option value="${esc(g)}">${esc(g)}</option>`).join('');
@@ -353,17 +611,10 @@ $('#group-filter').addEventListener('change', () => loadContacts().catch(alertEr
 
 async function openView(id) {
   viewingId = id;
-  try {
-    const [{ contact: c }, all] = await Promise.all([
-      api(`/api/contacts/${id}`),
-      api('/api/contacts'),
-    ]);
-    allContacts = all.contacts;
-    $('#view-body').innerHTML = viewHtml(c);
-    $('#view-dialog').showModal();
-  } catch (err) {
-    alertError(err);
-  }
+  const c = viewById(id);
+  if (!c) return;
+  $('#view-body').innerHTML = viewHtml(c);
+  if (!$('#view-dialog').open) $('#view-dialog').showModal();
 }
 
 function viewHtml(c) {
@@ -384,12 +635,12 @@ function viewHtml(c) {
   ).join('');
 
   const tags = (c.tags || '').split(',').map((t) => t.trim()).filter(Boolean);
-  const others = allContacts.filter((x) => x.id !== c.id);
+  const others = buildViews().filter((x) => x.id !== c.id);
   const relList = c.relations.length
     ? c.relations.map((r) => `
         <li>
           <span><span class="rel-role">${esc(r.role)}</span> · ${esc(r.other_name)}</span>
-          <button class="btn-danger" data-del-rel="${Number(r.id)}">Kaldir</button>
+          <button class="btn-danger" data-del-rel="${esc(r.key)}">Kaldir</button>
         </li>`).join('')
     : '<li class="meta">Henuz iliski eklenmedi.</li>';
   const options = others.map((o) => `<option value="${Number(o.id)}">${esc(fullName(o))}</option>`).join('');
@@ -444,7 +695,7 @@ $('#view-body').addEventListener('change', (e) => {
 
 $('#view-body').addEventListener('click', async (e) => {
   const act = e.target.closest('[data-act]')?.dataset.act;
-  const delRel = e.target.closest('[data-del-rel]')?.dataset.delRel;
+  const delKey = e.target.closest('[data-del-rel]')?.dataset.delRel;
   if (act === 'close') $('#view-dialog').close();
   if (act === 'bulk') {
     $('#view-dialog').close();
@@ -452,23 +703,22 @@ $('#view-body').addEventListener('click', async (e) => {
   }
   if (act === 'edit') {
     $('#view-dialog').close();
-    try {
-      const { contact } = await api(`/api/contacts/${viewingId}`);
-      openEdit(contact);
-    } catch (err) { alertError(err); }
+    openEdit(viewById(viewingId));
   }
   if (act === 'delete') {
     if (!confirm('Bu kisi ve tum iliskileri silinsin mi?')) return;
     try {
-      await api(`/api/contacts/${viewingId}`, { method: 'DELETE' });
+      await deleteContactById(viewingId);
       $('#view-dialog').close();
       await loadContacts();
     } catch (err) { if (err.message !== 'Islem iptal edildi') alertError(err); }
   }
-  if (delRel) {
+  if (delKey) {
     try {
-      await api(`/api/relations/${delRel}`, { method: 'DELETE' });
+      const entry = viewById(viewingId).relations.find((r) => r.key === delKey);
+      if (entry) await removeRelation(entry);
       await openView(viewingId);
+      await loadContacts();
     } catch (err) { if (err.message !== 'Islem iptal edildi') alertError(err); }
   }
 });
@@ -477,16 +727,12 @@ $('#view-body').addEventListener('submit', async (e) => {
   if (e.target.id !== 'rel-form') return;
   e.preventDefault();
   try {
-    await api('/api/relations', {
-      method: 'POST',
-      body: {
-        from_id: viewingId,
-        to_id: Number($('#rel-target').value),
-        label: $('#rel-label').value,
-        reverse_label: $('#rel-reverse').value,
-      },
-    });
+    const label = $('#rel-label').value.trim();
+    if (!label) throw new Error('Iliski etiketi zorunludur');
+    const added = await addRelations(viewingId, [Number($('#rel-target').value)], label, $('#rel-reverse').value.trim());
+    if (!added) throw new Error('Bu iliski zaten var');
     await openView(viewingId);
+    await loadContacts();
   } catch (err) { alertError(err); }
 });
 
@@ -495,7 +741,8 @@ $('#view-body').addEventListener('submit', async (e) => {
 function openBulk() {
   bulkSelected = new Set();
   $('#bulk-error').textContent = '';
-  const groups = [...new Set(allContacts.map((c) => c.group_name).filter(Boolean))].sort();
+  const all = buildViews();
+  const groups = [...new Set(all.map((c) => c.group_name).filter(Boolean))].sort();
   $('#bulk-group').innerHTML = '<option value="">Tum kisiler</option>' +
     groups.map((g) => `<option value="${esc(g)}">${esc(g)}</option>`).join('');
   $('#bulk-preset').innerHTML = presetOptions();
@@ -507,7 +754,7 @@ function openBulk() {
 
 function bulkVisible() {
   const g = $('#bulk-group').value;
-  return allContacts.filter((c) => c.id !== viewingId && (!g || c.group_name === g));
+  return buildViews().filter((c) => c.id !== viewingId && (!g || c.group_name === g));
 }
 
 function renderBulkList() {
@@ -553,18 +800,11 @@ $('#bulk-confirm').addEventListener('click', async () => {
   if (!bulkSelected.size) { $('#bulk-error').textContent = 'En az bir kisi secin.'; return; }
   if (!label) { $('#bulk-error').textContent = 'Iliski turu bos olamaz.'; return; }
   try {
-    const res = await api('/api/relations/bulk', {
-      method: 'POST',
-      body: {
-        from_id: viewingId,
-        to_ids: [...bulkSelected],
-        label,
-        reverse_label: $('#bulk-reverse').value.trim(),
-      },
-    });
+    const added = await addRelations(viewingId, [...bulkSelected], label, $('#bulk-reverse').value.trim());
     $('#bulk-dialog').close();
     await openView(viewingId);
-    alert(`${res.added} iliski eklendi.`);
+    await loadContacts();
+    alert(`${added} iliski eklendi.`);
   } catch (err) {
     $('#bulk-error').textContent = err.message;
   }
@@ -630,43 +870,12 @@ $('#cancel-btn').addEventListener('click', () => $('#contact-dialog').close());
 
 $('#contact-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const form = e.target;
-  const num = (v) => (v === '' ? null : Number(v));
-  const socials = [...$('#socials-list').querySelectorAll('.social-row')]
-    .map((row) => ({ platform: row.querySelector('select').value, username: row.querySelector('input').value.trim() }))
-    .filter((s) => s.username);
-  const extra = [...$('#extra-list').querySelectorAll('.extra-row')]
-    .map((row) => {
-      const [l, v] = row.querySelectorAll('input');
-      return { label: l.value.trim(), value: v.value.trim() };
-    })
-    .filter((x) => x.label && x.value);
-
-  const body = {
-    first_name: form.elements.first_name.value,
-    last_name: form.elements.last_name.value,
-    nickname: form.elements.nickname.value,
-    birth_year: num(form.elements.birth_year.value),
-    birth_month: num(form.elements.birth_month.value),
-    birth_day: num(form.elements.birth_day.value),
-    birthplace: form.elements.birthplace.value,
-    city: form.elements.city.value,
-    group_name: form.elements.group_name.value,
-    school: form.elements.school.value,
-    occupation: form.elements.occupation.value,
-    how_we_met: form.elements.how_we_met.value,
-    phone: form.elements.phone.value,
-    email: form.elements.email.value,
-    website: form.elements.website.value,
-    tags: form.elements.tags.value,
-    notes: form.elements.notes.value,
-    socials,
-    extra,
-  };
-
   try {
-    if (editingId) await api(`/api/contacts/${editingId}`, { method: 'PUT', body });
-    else await api('/api/contacts', { method: 'POST', body });
+    const data = buildFormData(e.target);
+    validate(data);
+    // Duzenlemede mevcut iliskiler korunur
+    data.relations = editingId ? (records.get(editingId)?.data.relations || []) : [];
+    await persist(editingId, data);
     $('#contact-dialog').close();
     await loadContacts();
   } catch (err) {
@@ -775,4 +984,7 @@ function alertError(err) {
   alert(err?.message || 'Bir hata olustu');
 }
 
-api('/api/me').then(showApp).catch(() => showLogin());
+api('/api/me').then(() => {
+  if (Vault.isUnlocked()) showApp();
+  else showLogin('Sifreli verileriniz icin tekrar giris yapin.');
+}).catch(() => showLogin());
