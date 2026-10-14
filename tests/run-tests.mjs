@@ -130,6 +130,18 @@ function stub() {
 let SESSION = null;
 globalThis.window = stub();
 globalThis.document = stub();
+// esc() tarayici DOM'u ister: test ortaminda ayni kacis davranisini taklit et
+document.createElement = () => {
+  let txt = '';
+  const target = {
+    set textContent(v) { txt = String(v ?? ''); },
+    get innerHTML() { return txt.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); },
+  };
+  return new Proxy(target, {
+    get(tg, p) { return p in tg ? tg[p] : stub(); },
+    set(tg, p, v) { if (p !== 'innerHTML') tg[p] = v; return true; },
+  });
+};
 globalThis.fetch = async (url, opts = {}) => {
   const u = new URL(url, 'https://t.example');
   const headers = new Headers(opts.headers || {});
@@ -282,6 +294,42 @@ await check('html: JS kullanan her kimlik sayfada veya JS isaretlemesinde var', 
   const ids = [...new Set([...js.matchAll(/\$\('#([\w-]+)'\)/g)].map((m) => m[1]))];
   const missing = ids.filter((i) => !idx.includes(`id="${i}"`) && !js.includes(`id="${i}"`));
   eq(missing, [], 'eksik kimlikler');
+});
+function assertNoTextOverlap(svg) {
+  const boxes = [...svg.matchAll(/<text([^>]*)>([^<]*)<\/text>/g)].map((m) => {
+    const attrs = m[1];
+    const cls = (attrs.match(/class="([^"]+)"/) || [])[1] || '';
+    const x = +attrs.match(/ x="([-\d.]+)"/)[1];
+    const y = +attrs.match(/ y="([-\d.]+)"/)[1];
+    const size = cls === 'edge-label' ? 10 : 11;
+    const w = m[2].length * size * 0.56;
+    return { x1: x - w / 2, x2: x + w / 2, y1: y - size, y2: y + size * 0.25, t: m[2] };
+  });
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+    const a = boxes[i], b = boxes[j];
+    if (!(a.x2 < b.x1 || a.x1 > b.x2 || a.y2 < b.y1 || a.y1 > b.y2)) {
+      throw new Error(`yazilar cakisiyor: "${a.t}" / "${b.t}"`);
+    }
+  }
+}
+await check('IH yazilari: 4 kisilik ornekte ust uste binmez', async () => {
+  const names = ['Ali Osman', 'Zeynep', 'Derya', 'Halil'];
+  const pairs = [[1,2,'kardesi'],[1,3,'annesi'],[1,4,'cocugu'],[2,3,'cocugu'],[2,4,'erkek kardesi'],[3,4,'kardesi']];
+  const v = names.map((n, i) => ({ id: i + 1, first_name: n, relations: [] }));
+  for (const [a, b, l] of pairs) { v[a-1].relations.push({ owner: a, to: b, label: l }); v[b-1].relations.push({ owner: a, to: b, label: l }); }
+  assertNoTextOverlap(A.graphSvg(v));
+});
+await check('IH yazilari: 60 kisilik yogun agda ust uste binmez', async () => {
+  const n = 60, v = [];
+  for (let i = 0; i < n; i++) v.push({ id: i + 1, first_name: 'Kisi ' + (i + 1), relations: [] });
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let i = 0; i < 90; i++) {
+    const a = Math.floor(rnd() * n) + 1, b = Math.floor(rnd() * n) + 1;
+    if (a === b) continue;
+    const l = 'iliski ' + (i % 5);
+    v[a-1].relations.push({ owner: a, to: b, label: l }); v[b-1].relations.push({ owner: a, to: b, label: l });
+  }
+  assertNoTextOverlap(A.graphSvg(v));
 });
 console.log(`\\nSONUC: ${pass} basarili, ${fail} basarisiz`);
 py.stdin.end();

@@ -1059,13 +1059,14 @@ function ringLayout(n) {
   const pts = [];
   let left = n, r = 60, ring = 0;
   while (left > 0) {
-    const cap = Math.min(left, Math.max(6, Math.floor((2 * Math.PI * r) / 26)));
+    const arc = n > 20 ? 44 : 26; // kalabalik agda dugumler daha aralikli
+    const cap = Math.min(left, Math.max(6, Math.floor((2 * Math.PI * r) / arc)));
     for (let k = 0; k < cap; k++) {
       const a = (2 * Math.PI * k) / cap - Math.PI / 2 + ring * 0.35;
       pts.push({ x: r * Math.cos(a), y: r * Math.sin(a) });
     }
     left -= cap;
-    r += 34;
+    r += n > 20 ? 52 : 34;
     ring++;
   }
   return pts;
@@ -1074,32 +1075,66 @@ function ringLayout(n) {
 function graphSvg(all) {
   const nodes = all.filter((c) => c.relations.length);
   if (!nodes.length) return null;
-  const raw = ringLayout(nodes.length);
-  const maxR = raw.reduce((m, p) => Math.max(m, Math.hypot(p.x, p.y)), 0);
+  const ring = ringLayout(nodes.length);
+  const maxR = ring.reduce((m, p) => Math.max(m, Math.hypot(p.x, p.y)), 0);
   graphW = Math.max(GRAPH_SIZE, Math.ceil(2 * (maxR + 50)));
   const c = graphW / 2;
   const nodeR = nodes.length <= 20 ? 16 : nodes.length <= 80 ? 11 : 8;
   const pos = new Map();
-  nodes.forEach((n, i) => pos.set(n.id, { x: c + raw[i].x, y: c + raw[i].y }));
+  nodes.forEach((n, i) => pos.set(n.id, { x: c + ring[i].x, y: c + ring[i].y }));
   const edges = [];
   for (const n of nodes) {
     for (const r of n.relations) {
-      if (r.owner !== n.id || !pos.has(r.to)) continue;
+      if (r.owner !== n.id || !pos.has(r.to)) continue; // her iliski bir kez cizilir
       edges.push({ a: pos.get(n.id), b: pos.get(r.to), label: r.label });
     }
   }
-  const svgEdges = edges.map((e) => {
+
+  // Yazi yerlesimi: once dugume ait isimler, sonra iliski etiketleri.
+  // Her yazi, daha once yerlesmis yazi ve dairelerle cakismiyorsa konur.
+  const placed = [];
+  const boxOf = (x, y, text, size) => {
+    const w = text.length * size * 0.56;
+    return { x1: x - w / 2, x2: x + w / 2, y1: y - size, y2: y + size * 0.25 };
+  };
+  const clash = (b) => placed.some((p) => !(b.x2 < p.x1 || b.x1 > p.x2 || b.y2 < p.y1 || b.y1 > p.y2));
+  for (const n of nodes) {
+    const p = pos.get(n.id);
+    placed.push({ x1: p.x - nodeR, x2: p.x + nodeR, y1: p.y - nodeR, y2: p.y + nodeR });
+  }
+  const nameY = new Map();
+  for (const n of nodes) {
+    const p = pos.get(n.id);
+    const cands = [p.y + nodeR + 13, p.y - nodeR - 5, p.y + nodeR + 27, p.y - nodeR - 21];
+    const y = cands.find((cy) => !clash(boxOf(p.x, cy, n.first_name, 11)));
+    if (y === undefined) continue; // okunamayacak yazi gosterilmez (ust uste binmez)
+    placed.push(boxOf(p.x, y, n.first_name, 11));
+    nameY.set(n.id, y);
+  }
+  const edgeText = [];
+  for (const e of edges) {
     const mx = (e.a.x + e.b.x) / 2, my = (e.a.y + e.b.y) / 2;
-    return `<line class="edge" x1="${e.a.x}" y1="${e.a.y}" x2="${e.b.x}" y2="${e.b.y}"/>` +
-      `<text class="edge-label" x="${mx}" y="${my}" text-anchor="middle">${esc(e.label)}</text>`;
-  }).join('');
+    const len = Math.hypot(e.b.x - e.a.x, e.b.y - e.a.y) || 1;
+    const nx = -(e.b.y - e.a.y) / len, ny = (e.b.x - e.a.x) / len; // kenara dik yon
+    for (const o of [0, 12, -12, 24, -24, 36, -36]) {
+      const x = mx + nx * o, y = my + ny * o + 3;
+      const bx = boxOf(x, y, e.label, 10);
+      if (!clash(bx)) { placed.push(bx); edgeText.push({ x, y, label: e.label }); break; }
+    }
+    // Yer bulunamazsa etiket gizlenir; cizgi yine de cizilir
+  }
+
+  const svgEdges = edges.map((e) =>
+    `<line class="edge" x1="${e.a.x}" y1="${e.a.y}" x2="${e.b.x}" y2="${e.b.y}"/>`).join('');
+  const svgEdgeText = edgeText.map((t) =>
+    `<text class="edge-label" x="${t.x}" y="${t.y}" text-anchor="middle">${esc(t.label)}</text>`).join('');
   const svgNodes = nodes.map((n) => {
     const p = pos.get(n.id);
     return `<g class="node" data-id="${Number(n.id)}"><circle cx="${p.x}" cy="${p.y}" r="${nodeR}"/>` +
-      `<text x="${p.x}" y="${p.y + nodeR + 13}">${esc(n.first_name)}</text></g>`;
+      (nameY.has(n.id) ? `<text x="${p.x}" y="${nameY.get(n.id)}" text-anchor="middle">${esc(n.first_name)}</text>` : '') + '</g>';
   }).join('');
   gv = { x: 0, y: 0, w: graphW, h: graphW };
-  return `<svg viewBox="0 0 ${graphW} ${graphW}" role="img" aria-label="Iliski haritasi">${svgEdges}${svgNodes}</svg>`;
+  return `<svg viewBox="0 0 ${graphW} ${graphW}" role="img" aria-label="Iliski haritasi">${svgEdges}${svgEdgeText}${svgNodes}</svg>`;
 }
 
 function graphLabelsOn() {
