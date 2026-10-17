@@ -62,3 +62,9 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   auth TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS notify_queue (
+  type TEXT PRIMARY KEY,
+  count INTEGER NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
