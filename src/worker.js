@@ -31,8 +31,8 @@ const SOCIAL = {
 
 const SECURITY_HEADERS = {
   'Content-Security-Policy':
-    "default-src 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self'; " +
-    "img-src 'self' data: https://cdn.simpleicons.org; connect-src 'self' https://challenges.cloudflare.com; " +
+    "default-src 'self'; script-src 'self' https://challenges.cloudflare.com https://unpkg.com; style-src 'self' https://unpkg.com; " +
+    "img-src 'self' data: https://cdn.simpleicons.org https://*.tile.openstreetmap.org; connect-src 'self' https://challenges.cloudflare.com; " +
     "frame-src https://challenges.cloudflare.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
