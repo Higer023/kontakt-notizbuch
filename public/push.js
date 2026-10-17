@@ -53,6 +53,17 @@
     if (testBtn) testBtn.addEventListener('click', () => test().catch((e) => msg(e.message)));
   }
 
+  // Uygulama acikken yaklasan dogum gunu sayisini sunucu kuyruguna yazar (sadece sayi, isim yok).
+  window.rehberQueue = function (type, count) {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    fetch('/api/push/queue', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: type, count: count }),
+    }).catch(() => {});
+  };
+
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind);
   else bind();
 })();
