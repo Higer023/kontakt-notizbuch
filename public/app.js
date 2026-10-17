@@ -1954,3 +1954,72 @@ $('#sel-merge').addEventListener('click', async () => {
     await loadContacts();
   } catch (err) { alertError(err); }
 });
+
+// ---------- Acik oturumlar (13) ----------
+function deviceLabel(ua) {
+  const u = String(ua || '');
+  const os = /iPhone|iPad/.test(u) ? 'iOS' : /Android/.test(u) ? 'Android' : /Windows/.test(u) ? 'Windows'
+    : /Mac OS X|Macintosh/.test(u) ? 'Mac' : /Linux/.test(u) ? 'Linux' : 'Bilinmeyen cihaz';
+  const br = /Edg\//.test(u) ? 'Edge' : /Chrome\//.test(u) ? 'Chrome' : /Firefox\//.test(u) ? 'Firefox'
+    : /Safari\//.test(u) ? 'Safari' : '';
+  return [os, br].filter(Boolean).join(' · ');
+}
+async function renderSessions() {
+  const list = $('#sessions-list');
+  list.innerHTML = '<div class="muted">Yukleniyor...</div>';
+  const { sessions } = await api('/api/sessions');
+  if (!sessions.length) { list.innerHTML = '<div class="empty">Acik oturum yok.</div>'; return; }
+  list.innerHTML = sessions.map((s) => `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin:8px 0">
+      <span>${esc(deviceLabel(s.ua))}${s.current ? ' <span class="muted">(bu cihaz)</span>' : ''}<br>
+      <span class="muted" style="font-size:12px">Acilis: ${esc(String(s.created_at))} (UTC)</span></span>
+      ${s.current ? '' : `<button class="btn-danger" data-sess="${esc(s.id)}">Kapat</button>`}</div>`).join('');
+}
+$('#sessions-open').addEventListener('click', async () => {
+  $('#settings-dialog').close();
+  $('#sessions-dialog').showModal();
+  try { await renderSessions(); } catch (err) { if (err.message !== 'Islem iptal edildi') alertError(err); }
+});
+$('#sessions-list').addEventListener('click', async (e) => {
+  const id = e.target.closest('[data-sess]')?.dataset.sess;
+  if (!id) return;
+  try { await api('/api/sessions', { method: 'DELETE', body: { id } }); await renderSessions(); }
+  catch (err) { if (err.message !== 'Islem iptal edildi') alertError(err); }
+});
+$('#sessions-all').addEventListener('click', async () => {
+  if (!confirm('Bu cihaz haric tum oturumlar kapatilsin mi?')) return;
+  try { await api('/api/sessions', { method: 'DELETE', body: { all: true } }); await renderSessions(); }
+  catch (err) { if (err.message !== 'Islem iptal edildi') alertError(err); }
+});
+$('#sessions-close').addEventListener('click', () => $('#sessions-dialog').close());
+
+// ---------- Dogum gunu bildirimi (10): sadece uygulama acikken; metinde isim yok ----------
+async function checkBirthdayNotice() {
+  try {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    if (!Vault.isUnlocked() || !contacts.length) return;
+    const today = todayMidnight();
+    const day = today.toISOString().slice(0, 10);
+    if (localStorage.getItem('rehber-bday-notice') === day) return;
+    const soon = contacts.filter((c) => {
+      const d = nextBirthday(c, today);
+      return d && Math.round((d - today) / 86400000) <= 1;
+    }).length;
+    if (!soon) return;
+    const body = soon + ' kisinin dogum gunu bugun ya da yarin. Ayrintilar icin uygulamayi acin.';
+    if ('serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.ready;
+      await reg.showNotification('Rehber', { body, tag: 'bday', icon: '/icons/icon-192.png' });
+    } else {
+      new Notification('Rehber', { body });
+    }
+    localStorage.setItem('rehber-bday-notice', day);
+  } catch { /* bildirim desteklenmiyorsa sessiz gec */ }
+}
+$('#notify-enable').addEventListener('click', async () => {
+  if (!('Notification' in window)) { alert('Bu tarayici bildirimleri desteklemiyor.'); return; }
+  const p = await Notification.requestPermission();
+  alert(p === 'granted' ? 'Bildirimler acildi.' : 'Bildirim izni verilmedi.');
+  checkBirthdayNotice();
+});
+setTimeout(checkBirthdayNotice, 4000);
+setInterval(checkBirthdayNotice, 60 * 60 * 1000);
