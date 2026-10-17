@@ -650,7 +650,7 @@ function viewHtml(c) {
   const rowsHtml = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
   const web = c.website ? `<dt>Web</dt><dd><a href="${esc(c.website)}" target="_blank" rel="noopener noreferrer nofollow">${esc(c.website)}</a></dd>` : '';
 
-  const socials = c.socials.map((s) =>
+  const socials = quickActions(c) + c.socials.map((s) =>
     `<a class="chip" href="${esc(s.url)}" target="_blank" rel="noopener noreferrer nofollow"><img src="${esc(s.icon)}" alt="">${esc(s.platform)} @${esc(s.username)}</a>`
   ).join('');
 
@@ -1152,7 +1152,7 @@ function summaryHtml(all) {
 }
 
 function openSummary() {
-  $('#summary-box').innerHTML = summaryHtml(buildViews());
+  $('#summary-box').innerHTML = summaryHtml(buildViews()) + birthdaysHtml();
   $('#summary-dialog').showModal();
 }
 $('#summary-close').addEventListener('click', () => $('#summary-dialog').close());
@@ -1545,3 +1545,61 @@ for (const [name, lat, lng] of REGION_CITIES) CITY_COORDS[cityKey(name)] = [lat,
   input.addEventListener('input', update);
   input.addEventListener('change', update);
 })();
+
+// ---------- Hizli eylemler (detay penceresi): ara, mesaj, e-posta ----------
+function quickActions(c) {
+  const tel = c.phone ? String(c.phone).replace(/[^\d+]/g, '') : '';
+  const parts = [];
+  if (tel) {
+    parts.push(`<a class="chip" href="tel:${tel}">Ara</a>`);
+    parts.push(`<a class="chip" href="sms:${tel}">Mesaj</a>`);
+  }
+  if (c.email) parts.push(`<a class="chip" href="mailto:${encodeURIComponent(c.email)}">E-posta</a>`);
+  return parts.length ? `<div class="chips">${parts.join('')}</div>` : '';
+}
+
+// ---------- Dogum gunu hatirlatici (ozet + .ics) ----------
+function nextBirthday(c, today) {
+  if (!c.birth_month || !c.birth_day) return null;
+  let d = new Date(today.getFullYear(), c.birth_month - 1, c.birth_day);
+  if (d < today) d = new Date(today.getFullYear() + 1, c.birth_month - 1, c.birth_day);
+  return d;
+}
+function todayMidnight() { const t = new Date(); return new Date(t.getFullYear(), t.getMonth(), t.getDate()); }
+function birthdaysHtml() {
+  const today = todayMidnight();
+  const items = contacts
+    .map((c) => ({ name: fullName(c) || c.first_name, d: nextBirthday(c, today) }))
+    .filter((x) => x.d)
+    .map((x) => ({ ...x, days: Math.round((x.d - today) / 86400000) }))
+    .filter((x) => x.days <= 30)
+    .sort((a, b) => a.days - b.days);
+  const head = '<h3>Yaklasan dogum gunleri (30 gun)</h3>';
+  if (!items.length) return head + '<div class="empty">Onumuzdeki 30 gun dogum gunu yok.</div>';
+  return head + items.map((x) =>
+    `<div>${esc(x.name)} · ${x.d.toLocaleDateString('tr-TR')}${x.days === 0 ? ' (bugun)' : ` (${x.days} gun sonra)`}</div>`
+  ).join('');
+}
+function icsEscape(s) {
+  return String(s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+}
+function exportBirthdaysIcs() {
+  const today = todayMidnight();
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+  const events = contacts.map((c, i) => ({ c, i, d: nextBirthday(c, today) })).filter((x) => x.d).map(({ c, i, d }) => {
+    const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+    return [
+      'BEGIN:VEVENT',
+      `UID:birthday-${c.id ?? i}@rehber`,
+      `DTSTAMP:${stamp}`,
+      `DTSTART;VALUE=DATE:${ymd}`,
+      'RRULE:FREQ=YEARLY',
+      `SUMMARY:${icsEscape((fullName(c) || c.first_name) + ' dogum gunu')}`,
+      'END:VEVENT',
+    ].join('\r\n');
+  });
+  if (!events.length) { alert('Dogum gunu bilgisi olan kisi yok (gun ve ay gerekli).'); return; }
+  const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Rehber//TR', 'CALSCALE:GREGORIAN', ...events, 'END:VCALENDAR'].join('\r\n');
+  downloadText(ics, `dogum-gunleri-${stampDate()}.ics`, 'text/calendar;charset=utf-8');
+}
+$('#export-ics').addEventListener('click', exportBirthdaysIcs);
