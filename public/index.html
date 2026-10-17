@@ -108,6 +108,16 @@
 <button type="button" id="sel-cancel" class="glass">Iptal</button>
 </div>
 
+<dialog id="sessions-dialog" class="sheet">
+<div class="sheet-body form">
+<div class="sheet-grip"></div>
+<h2>Acik oturumlar</h2>
+<p class="muted">Bu cihaz disindaki oturumlari buradan kapatabilirsiniz.</p>
+<div id="sessions-list"></div>
+<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button type="button" id="sessions-all" class="btn-danger">Bu cihaz haric tumunu kapat</button><button type="button" id="sessions-close" class="glass">Kapat</button></div>
+</div>
+</dialog>
+
 <dialog id="trash-dialog" class="sheet">
 <div class="sheet-body form">
 <div class="sheet-grip"></div>
@@ -125,6 +135,8 @@
       <div class="graph-menu-list">
         <button type="button" id="theme-btn" class="glass">Tema degistir (acik / koyu)</button>
         <button type="button" id="install-app" class="glass hidden">Uygulama olarak yukle</button>
+        <button type="button" id="notify-enable" class="glass">Dogum gunu bildirimlerini ac</button>
+        <button type="button" id="sessions-open" class="glass">Acik oturumlar</button>
         <button type="button" id="trash-open" class="glass">Cop kutusu (30 gun)</button>
         <button type="button" id="import-contacts" class="glass">Kisi ice aktar (.vcf / Google .csv)</button>
         <button type="button" id="export-ics" class="glass">Dogum gunu takvimi (.ics)</button>
