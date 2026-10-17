@@ -1,6 +1,6 @@
 // Parmak izi (WebAuthn): kayit ve giris. Biyometri cihazda kalir, sunucuya sadece imza gider.
 (function () {
-  const $ = (id) => document.getElementById(id);
+  const $ = (sel) => document.querySelector(sel);
 
   function b64uToBuf(s) {
     const pad = '='.repeat((4 - (s.length % 4)) % 4);
