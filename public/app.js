@@ -2023,3 +2023,18 @@ $('#notify-enable').addEventListener('click', async () => {
 });
 setTimeout(checkBirthdayNotice, 4000);
 setInterval(checkBirthdayNotice, 60 * 60 * 1000);
+
+// ---------- Push kuyrugu: 7 gun icindeki dogum gunu sayisi (sadece sayi) ----------
+function queueBirthdayDigest() {
+  try {
+    if (!Vault.isUnlocked() || !contacts.length) return;
+    const today = todayMidnight();
+    const week = contacts.filter((c) => {
+      const d = nextBirthday(c, today);
+      return d && Math.round((d - today) / 86400000) <= 7;
+    }).length;
+    if (window.rehberQueue) window.rehberQueue('birthday', week);
+  } catch { /* sessiz gec */ }
+}
+setTimeout(queueBirthdayDigest, 6000);
+setInterval(queueBirthdayDigest, 60 * 60 * 1000);
