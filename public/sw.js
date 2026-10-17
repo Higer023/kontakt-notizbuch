@@ -1,5 +1,5 @@
-const CACHE = 'rehber-shell-v4';
-const SHELL = ['/', '/index.html', '/style.css', '/app.js', '/push.js', '/crypto.js', '/icon.svg', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/badge-96.png'];
+const CACHE = 'rehber-shell-v5';
+const SHELL = ['/', '/index.html', '/style.css', '/app.js', '/push.js', '/passkey.js', '/crypto.js', '/icon.svg', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/badge-96.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
