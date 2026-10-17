@@ -94,6 +94,8 @@ async function handleApi(request, env, url) {
 
   if (pathname === '/api/login' && method === 'POST') return login(request, env, ip);
   if (pathname === '/api/logout' && method === 'POST') return logout(request, env);
+  if (pathname === '/api/passkey/login/options' && method === 'POST') return passkeyLoginOptions(env, url);
+  if (pathname === '/api/passkey/login/verify' && method === 'POST') return passkeyLogin(request, env, ip, url);
 
   const session = await requireSession(request, env);
   if (!session) throw new HttpError(401, 'Yetkisiz');
@@ -103,6 +105,10 @@ async function handleApi(request, env, url) {
 
   if (pathname === '/api/reauth' && method === 'POST') return reauth(request, env, ip, session);
   if (pathname === '/api/me' && method === 'GET') return json({ ok: true });
+  if (pathname === '/api/passkey/register/options' && method === 'POST') { requireFresh(); return passkeyRegisterOptions(env, url); }
+  if (pathname === '/api/passkey/register/verify' && method === 'POST') { requireFresh(); return passkeyRegisterVerify(request, env, url); }
+  if (pathname === '/api/passkey/list' && method === 'GET') return passkeyList(env);
+  if (pathname === '/api/passkey/delete' && method === 'POST') { requireFresh(); return passkeyDelete(request, env); }
   if (pathname.startsWith('/api/push/')) return handlePush(request, env, url, { readJson, json, HttpError });
   // Kayitlar ve IP listesi sifreli: okumak icin yeniden parola gerekir
   if (pathname === '/api/logs' && method === 'GET') {
@@ -1118,4 +1124,244 @@ async function sendDigest(env) {
       console.error('ozet push gonderilemedi', err);
     }
   }
+}
+
+// ---- Parmak izi (WebAuthn / passkey) ----
+// Parola yerine gecen dogrulama: tarayici biyometriyi cihazda yapar, sunucu imzayi dogrular.
+// Konum, Turnstile ve brute-force kontrolleri giris ile aynen uygulanir.
+const PASSKEY_MAX = 10;
+const CHALLENGE_MINUTES = 5;
+
+function randomBytes(n) {
+  const b = new Uint8Array(n);
+  crypto.getRandomValues(b);
+  return b;
+}
+
+async function digestBytes(bytes) {
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+}
+
+function concatBytes(...arrs) {
+  const out = new Uint8Array(arrs.reduce((s, a) => s + a.length, 0));
+  let o = 0;
+  for (const a of arrs) { out.set(a, o); o += a.length; }
+  return out;
+}
+
+function bytesEq(a, b) {
+  if (a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a[i] ^ b[i];
+  return d === 0;
+}
+
+// Minimal CBOR (WebAuthn icin yeterli: uint, negint, bytes, text, array, map, bool, null)
+function cborDecode(bytes) {
+  let pos = 0;
+  const need = (n) => { if (pos + n > bytes.length) throw new Error('CBOR sinir asildi'); };
+  const readLen = (ai) => {
+    if (ai < 24) return ai;
+    if (ai === 24) { need(1); return bytes[pos++]; }
+    if (ai === 25) { need(2); const v = (bytes[pos] << 8) | bytes[pos + 1]; pos += 2; return v; }
+    if (ai === 26) { need(4); const v = ((bytes[pos] << 24) >>> 0) + ((bytes[pos + 1] << 16) | (bytes[pos + 2] << 8) | bytes[pos + 3]); pos += 4; return v; }
+    throw new Error('CBOR desteklenmeyen uzunluk');
+  };
+  const item = () => {
+    need(1);
+    const ib = bytes[pos++];
+    const major = ib >> 5;
+    const ai = ib & 31;
+    if (major === 0) return readLen(ai);
+    if (major === 1) return -1 - readLen(ai);
+    if (major === 2) { const n = readLen(ai); need(n); const v = bytes.slice(pos, pos + n); pos += n; return v; }
+    if (major === 3) { const n = readLen(ai); need(n); const v = new TextDecoder().decode(bytes.slice(pos, pos + n)); pos += n; return v; }
+    if (major === 4) { const n = readLen(ai); const arr = []; for (let i = 0; i < n; i++) arr.push(item()); return arr; }
+    if (major === 5) { const n = readLen(ai); const m = new Map(); for (let i = 0; i < n; i++) { const k = item(); m.set(k, item()); } return m; }
+    if (major === 7) { if (ai === 20) return false; if (ai === 21) return true; if (ai === 22) return null; }
+    throw new Error('CBOR desteklenmeyen tip');
+  };
+  return item();
+}
+
+// authenticatorData: rpIdHash(32) | flags(1) | signCount(4) | [aaguid(16) | credIdLen(2) | credId | COSE key]
+function parseAuthData(auth) {
+  const rpIdHash = auth.slice(0, 32);
+  const flags = auth[32];
+  const signCount = ((auth[33] << 24) >>> 0) + ((auth[34] << 16) | (auth[35] << 8) | auth[36]);
+  let cred = null;
+  if (flags & 0x40) {
+    const credLen = (auth[53] << 8) | auth[54];
+    const credId = auth.slice(55, 55 + credLen);
+    const key = cborDecode(auth.slice(55 + credLen));
+    cred = {
+      id: b64uEncode(credId),
+      kty: key.get(1),
+      alg: key.get(3),
+      crv: key.get(-1),
+      x: b64uEncode(key.get(-2)),
+      y: b64uEncode(key.get(-3)),
+    };
+  }
+  return { rpIdHash, flags, signCount, cred };
+}
+
+// WebAuthn imzasi DER formatindadir; WebCrypto ham r||s bekler.
+function derToRaw(der) {
+  let p = 2;
+  if (der[1] & 0x80) p = 2 + (der[1] & 0x7f);
+  if (der[p] !== 0x02) throw new Error('DER');
+  const rl = der[p + 1];
+  const r = der.slice(p + 2, p + 2 + rl);
+  p = p + 2 + rl;
+  if (der[p] !== 0x02) throw new Error('DER');
+  const sl = der[p + 1];
+  const s = der.slice(p + 2, p + 2 + sl);
+  const fix = (x) => {
+    let v = x;
+    while (v.length > 32 && v[0] === 0) v = v.slice(1);
+    const out = new Uint8Array(32);
+    out.set(v, 32 - v.length);
+    return out;
+  };
+  return concatBytes(fix(r), fix(s));
+}
+
+async function newChallenge(env, purpose) {
+  const challenge = b64uEncode(randomBytes(32));
+  await env.DB.prepare("DELETE FROM webauthn_challenges WHERE created_at < datetime('now', '-1 day')").run();
+  await env.DB.prepare('INSERT INTO webauthn_challenges (challenge, purpose) VALUES (?, ?)').bind(challenge, purpose).run();
+  return challenge;
+}
+
+// Tek kullanimlik: bulunsa da bulunmasa da silinir
+async function consumeChallenge(env, purpose, challenge) {
+  const row = await env.DB.prepare(
+    "SELECT challenge FROM webauthn_challenges WHERE challenge = ? AND purpose = ? AND created_at > datetime('now', ?)"
+  ).bind(String(challenge || ''), purpose, `-${CHALLENGE_MINUTES} minutes`).first();
+  await env.DB.prepare('DELETE FROM webauthn_challenges WHERE challenge = ?').bind(String(challenge || '')).run();
+  return !!row;
+}
+
+async function passkeyLoginOptions(env, url) {
+  const challenge = await newChallenge(env, 'login');
+  return json({ challenge, rpId: url.hostname, userVerification: 'required', timeout: 60000 });
+}
+
+async function passkeyRegisterOptions(env, url) {
+  const challenge = await newChallenge(env, 'register');
+  const rows = await env.DB.prepare('SELECT id FROM webauthn_credentials').all();
+  return json({
+    challenge,
+    rp: { id: url.hostname, name: 'Rehber' },
+    user: { id: b64uEncode(new TextEncoder().encode('rehber-admin')), name: 'rehber', displayName: 'Rehber' },
+    excludeCredentials: (rows.results || []).map((r) => r.id),
+  });
+}
+
+async function passkeyRegisterVerify(request, env, url) {
+  const body = await readJson(request);
+  const bad = () => new HttpError(400, 'Parmak izi kaydedilemedi');
+  let cd;
+  let att;
+  let parsed;
+  try {
+    const r = body.response || {};
+    cd = JSON.parse(new TextDecoder().decode(b64uDecode(String(r.clientDataJSON || ''))));
+    att = cborDecode(b64uDecode(String(r.attestationObject || '')));
+    parsed = parseAuthData(att.get('authData'));
+  } catch {
+    throw bad();
+  }
+  if (cd.type !== 'webauthn.create' || cd.origin !== url.origin) throw bad();
+  if (!(await consumeChallenge(env, 'register', cd.challenge))) {
+    throw new HttpError(400, 'Oturum suresi doldu, tekrar deneyin');
+  }
+  if (!bytesEq(parsed.rpIdHash, await digestBytes(new TextEncoder().encode(url.hostname)))) throw bad();
+  if (!(parsed.flags & 0x01) || !(parsed.flags & 0x04) || !parsed.cred) throw bad();
+  if (parsed.cred.kty !== 2 || parsed.cred.alg !== -7 || parsed.cred.crv !== 1) throw bad();
+  if (parsed.cred.id !== String(body.id || '')) throw bad();
+
+  const count = await env.DB.prepare('SELECT COUNT(*) AS n FROM webauthn_credentials').first();
+  if (count && count.n >= PASSKEY_MAX) throw new HttpError(409, 'Parmak izi sinirina ulasildi');
+  await env.DB.prepare(
+    'INSERT INTO webauthn_credentials (id, x, y, sign_count) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING'
+  ).bind(parsed.cred.id, parsed.cred.x, parsed.cred.y, parsed.signCount).run();
+  return json({ ok: true });
+}
+
+async function verifyAssertion(env, a, url) {
+  if (!a || typeof a.id !== 'string' || !a.response) return false;
+  const row = await env.DB.prepare('SELECT id, x, y, sign_count FROM webauthn_credentials WHERE id = ?').bind(a.id).first();
+  if (!row) return false;
+  try {
+    const clientBytes = b64uDecode(String(a.response.clientDataJSON || ''));
+    const cd = JSON.parse(new TextDecoder().decode(clientBytes));
+    if (cd.type !== 'webauthn.get' || cd.origin !== url.origin) return false;
+    if (!(await consumeChallenge(env, 'login', cd.challenge))) return false;
+
+    const authData = b64uDecode(String(a.response.authenticatorData || ''));
+    const parsed = parseAuthData(authData);
+    if (!bytesEq(parsed.rpIdHash, await digestBytes(new TextEncoder().encode(url.hostname)))) return false;
+    if (!(parsed.flags & 0x01) || !(parsed.flags & 0x04)) return false;
+
+    const data = concatBytes(authData, await digestBytes(clientBytes));
+    const pub = await crypto.subtle.importKey(
+      'jwk', { kty: 'EC', crv: 'P-256', x: row.x, y: row.y, ext: true },
+      { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']
+    );
+    const sig = derToRaw(b64uDecode(String(a.response.signature || '')));
+    if (!(await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, pub, sig, data))) return false;
+
+    // Klon tespiti: sayac birlikte kullanildiysa geri gitmemeli
+    if ((parsed.signCount > 0 || row.sign_count > 0) && parsed.signCount <= row.sign_count) return false;
+    await env.DB.prepare('UPDATE webauthn_credentials SET sign_count = ? WHERE id = ?').bind(parsed.signCount, row.id).run();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function passkeySessionCookie(request, env) {
+  await env.DB.prepare("DELETE FROM sessions WHERE expires_at < datetime('now')").run();
+  await env.DB.prepare('DELETE FROM session_meta WHERE token_hash NOT IN (SELECT token_hash FROM sessions)').run();
+  const token = randomToken();
+  await env.DB.prepare(
+    "INSERT INTO sessions (token_hash, expires_at, reauth_until) VALUES (?, datetime('now', ?), datetime('now', ?))"
+  ).bind(await sha256(token), `+${SESSION_HOURS} hours`, `+${REAUTH_MINUTES} minutes`).run();
+  await env.DB.prepare('INSERT OR REPLACE INTO session_meta (token_hash, ua) VALUES (?, ?)')
+    .bind(await sha256(token), String(request.headers.get('User-Agent') || '').slice(0, 200)).run();
+  return sessionCookie(token, SESSION_HOURS * 3600);
+}
+
+async function passkeyLogin(request, env, ip, url) {
+  if ((await recentFailCount(env, ip)) >= MAX_FAILS) {
+    throw new HttpError(429, 'Cok fazla hatali deneme. Lutfen daha sonra tekrar deneyin.');
+  }
+  const body = await readJson(request);
+  if (!hasGeo(body)) {
+    await recordFootprint(env, request, ip, 'login_no_geo', false, body.fp);
+    throw new HttpError(403, 'Konum izni olmadan giris yapilamaz');
+  }
+  if (!(await verifyTurnstile(env, body.turnstile, ip))) {
+    await recordFootprint(env, request, ip, 'login_bot', false, body.fp);
+    throw new HttpError(403, 'Dogrulama basarisiz. Lutfen tekrar deneyin.');
+  }
+  const ok = await verifyAssertion(env, body.assertion, url);
+  await recordFootprint(env, request, ip, 'login', ok, body.fp);
+  if (!ok) throw new HttpError(401, 'Parmak izi dogrulanamadi');
+  return json({ ok: true }, 200, { 'Set-Cookie': await passkeySessionCookie(request, env) });
+}
+
+async function passkeyList(env) {
+  const rows = await env.DB.prepare('SELECT id, created_at FROM webauthn_credentials ORDER BY created_at').all();
+  return json({ items: rows.results || [] });
+}
+
+async function passkeyDelete(request, env) {
+  const body = await readJson(request);
+  const id = String(body.id || '');
+  if (!id) throw new HttpError(400, 'Gecersiz istek');
+  await env.DB.prepare('DELETE FROM webauthn_credentials WHERE id = ?').bind(id).run();
+  return json({ ok: true });
 }
