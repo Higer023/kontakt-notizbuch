@@ -99,6 +99,7 @@ async function handleApi(request, env, url) {
 
   if (pathname === '/api/reauth' && method === 'POST') return reauth(request, env, ip, session);
   if (pathname === '/api/me' && method === 'GET') return json({ ok: true });
+  if (pathname.startsWith('/api/push/')) return handlePush(request, env, url, { readJson, json, HttpError });
   // Kayitlar ve IP listesi sifreli: okumak icin yeniden parola gerekir
   if (pathname === '/api/logs' && method === 'GET') {
     requireFresh();
@@ -959,4 +960,113 @@ function b64url(bytes) {
 
 function unb64(s) {
   return Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+}
+
+// ---- Web Push (VAPID) ----
+// Web Push (VAPID). Bildirimler icerik tasimaz: sunucu bos istek gonderir,
+// metni service worker kendisi yazar. Bu sayede kisisel veri push servislerinden gecmez.
+const VAPID_PUBLIC_KEY = 'BDUEFNLqLZF73Kdtu7qk2UbUeraEnY4dcGHKcc1hggyx2kUmcCrmRInALuCFosTcLMDwZctKKJWTZwQNBssqwH4';
+const VAPID_SUBJECT = 'https://kontakt-notizbuch.halilgercek023.workers.dev';
+const MAX_SUBSCRIPTIONS = 10;
+
+async function handlePush(request, env, url, deps) {
+  const { readJson, json, HttpError } = deps;
+  const { pathname } = url;
+  const method = request.method;
+
+  if (pathname === '/api/push/key' && method === 'GET') {
+    return json({ key: VAPID_PUBLIC_KEY });
+  }
+
+  if (pathname === '/api/push/subscribe' && method === 'POST') {
+    const body = await readJson(request);
+    const endpoint = String(body.endpoint || '');
+    const p256dh = String((body.keys && body.keys.p256dh) || '');
+    const auth = String((body.keys && body.keys.auth) || '');
+    if (!/^https:\/\/\S{10,500}$/.test(endpoint) || p256dh.length < 20 || p256dh.length > 200 || auth.length < 10 || auth.length > 100) {
+      throw new HttpError(400, 'Gecersiz abonelik');
+    }
+    const count = await env.DB.prepare('SELECT COUNT(*) AS n FROM push_subscriptions').first();
+    const exists = await env.DB.prepare('SELECT endpoint FROM push_subscriptions WHERE endpoint = ?').bind(endpoint).first();
+    if (!exists && count && count.n >= MAX_SUBSCRIPTIONS) throw new HttpError(409, 'Abonelik siniri doldu');
+    await env.DB.prepare(
+      'INSERT INTO push_subscriptions (endpoint, p256dh, auth) VALUES (?, ?, ?) ' +
+      'ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth'
+    ).bind(endpoint, p256dh, auth).run();
+    return json({ ok: true });
+  }
+
+  if (pathname === '/api/push/unsubscribe' && method === 'POST') {
+    const body = await readJson(request);
+    const endpoint = String(body.endpoint || '');
+    if (endpoint) await env.DB.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').bind(endpoint).run();
+    return json({ ok: true });
+  }
+
+  if (pathname === '/api/push/test' && method === 'POST') {
+    const rows = await env.DB.prepare('SELECT endpoint FROM push_subscriptions').all();
+    let sent = 0;
+    let removed = 0;
+    for (const row of rows.results || []) {
+      try {
+        const res = await sendEmpty(row.endpoint, env);
+        if (res.status === 404 || res.status === 410) {
+          await env.DB.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').bind(row.endpoint).run();
+          removed++;
+        } else if (res.ok) {
+          sent++;
+        }
+      } catch (err) {
+        console.error('push gonderilemedi', err);
+      }
+    }
+    return json({ ok: true, sent, removed });
+  }
+
+  throw new HttpError(404, 'Bulunamadi');
+}
+
+async function sendEmpty(endpoint, env) {
+  const jwt = await vapidJwt(new URL(endpoint).origin, env);
+  return fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      TTL: '86400',
+      Urgency: 'normal',
+      Authorization: `vapid t=${jwt}, k=${VAPID_PUBLIC_KEY}`,
+    },
+  });
+}
+
+async function vapidJwt(aud, env) {
+  if (!env.VAPID_PRIVATE_KEY) throw new Error('VAPID_PRIVATE_KEY tanimli degil');
+  const pub = b64uDecode(VAPID_PUBLIC_KEY);
+  const key = await crypto.subtle.importKey(
+    'jwk',
+    { kty: 'EC', crv: 'P-256', d: env.VAPID_PRIVATE_KEY, x: b64uEncode(pub.slice(1, 33)), y: b64uEncode(pub.slice(33, 65)), ext: true },
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    false,
+    ['sign']
+  );
+  const header = b64uEncode(new TextEncoder().encode(JSON.stringify({ typ: 'JWT', alg: 'ES256' })));
+  const payload = b64uEncode(new TextEncoder().encode(JSON.stringify({
+    aud,
+    exp: Math.floor(Date.now() / 1000) + 12 * 3600,
+    sub: VAPID_SUBJECT,
+  })));
+  const data = new TextEncoder().encode(`${header}.${payload}`);
+  const sig = new Uint8Array(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, key, data));
+  return `${header}.${payload}.${b64uEncode(sig)}`;
+}
+
+function b64uEncode(bytes) {
+  let s = '';
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function b64uDecode(str) {
+  const pad = '='.repeat((4 - (str.length % 4)) % 4);
+  const bin = atob(str.replace(/-/g, '+').replace(/_/g, '/') + pad);
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
 }
