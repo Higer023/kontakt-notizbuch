@@ -1430,3 +1430,33 @@ for (const [name, lat, lng] of REGION_CITIES) CITY_COORDS[cityKey(name)] = [lat,
   if (!dl) return;
   dl.innerHTML += REGION_CITIES.map(([name]) => `<option value="${esc(name)}"></option>`).join('');
 })();
+
+// ---------- Kisi formunda canli konum onizlemesi (tarayicida, dis servis yok) ----------
+(function livePreview() {
+  const input = document.querySelector('input[name="city"]');
+  const box = document.getElementById('city-preview');
+  const note = document.getElementById('city-preview-note');
+  if (!input || !box || !note) return;
+  let map = null, marker = null;
+  function update() {
+    const raw = input.value.trim();
+    if (!raw) { note.textContent = ''; if (marker) { marker.remove(); marker = null; } return; }
+    if (typeof L === 'undefined') { note.textContent = 'Harita kutuphanesi yuklenemedi.'; return; }
+    if (!map) {
+      map = L.map(box, { zoomControl: false, attributionControl: false }).setView([39.0, 35.0], 4);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 16 }).addTo(map);
+    }
+    const pos = CITY_COORDS[cityKey(raw)];
+    if (marker) { marker.remove(); marker = null; }
+    if (pos) {
+      marker = L.circleMarker(pos, { radius: 7 }).addTo(map);
+      map.setView(pos, 9);
+      note.textContent = 'Haritada: ' + raw;
+    } else {
+      note.textContent = 'Bu yer haritada kayitli degil. Listeden bir il veya Alman sehri secin.';
+    }
+    setTimeout(() => map.invalidateSize(), 0);
+  }
+  input.addEventListener('input', update);
+  input.addEventListener('change', update);
+})();
