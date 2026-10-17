@@ -86,7 +86,7 @@
     const geo = await getGeo();
     const fp = await getFingerprint(geo);
     const code = newCode();
-    await postPlain('/api/recovery/send', { code, blob: await wrapPassword(code, password), fp, turnstile });
+    await postPlain('/api/recovery/send', { username: $('#username').value, password, code, blob: await wrapPassword(code, password), fp, turnstile });
     window.turnstile?.reset();
     awaitingCode = true;
     $('#login-error').textContent = 'Kurtarma kodu e-postaniza gonderildi. Dogrulamayi tekrar tamamlayip ayni dugmeye basin ve kodu girin.';
@@ -97,15 +97,18 @@
     const code = prompt('E-postanizdaki kurtarma kodunu girin:');
     if (!code) return;
     if (!normalize(code)) throw new Error('Kod bos.');
+    const typed = $('#password').value;
+    if (!typed) throw new Error('Kasa parolasini girin.');
     const turnstile = window.turnstile ? window.turnstile.getResponse() : '';
     if (!turnstile) throw new Error('Lutfen dogrulamayi tamamlayin.');
     $('#login-error').textContent = 'Konum izni isteniyor...';
     const geo = await getGeo();
     const fp = await getFingerprint(geo);
-    const r = await postPlain('/api/recovery/login', { code, fp, turnstile });
+    const r = await postPlain('/api/recovery/login', { username: $('#username').value, password: typed, code, fp, turnstile });
     let password;
     try { password = await unwrapPassword(code, r.blob); }
     catch { throw new Error('Kurtarma kodu hatali.'); }
+    if (password !== typed) throw new Error('Kasa parolasi hatali.');
     try { await unlockVault(password); }
     catch (e) { await postPlain('/api/logout', {}).catch(() => {}); throw e; }
     awaitingCode = false;
