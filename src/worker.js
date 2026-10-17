@@ -97,6 +97,7 @@ async function handleApi(request, env, url) {
   if (pathname === '/api/passkey/login/options' && method === 'POST') return passkeyLoginOptions(env, url);
   if (pathname === '/api/passkey/login/verify' && method === 'POST') return passkeyLogin(request, env, ip, url);
   if (pathname === '/api/recovery/login' && method === 'POST') return recoveryLogin(request, env, ip, url);
+  if (pathname === '/api/recovery/send' && method === 'POST') return recoverySend(request, env, ip);
 
   const session = await requireSession(request, env);
   if (!session) throw new HttpError(401, 'Yetkisiz');
@@ -1395,8 +1396,16 @@ async function recoveryLogin(request, env, ip, url) {
   const row = await env.DB.prepare('SELECT code_hash, blob FROM recovery WHERE id = 1').first();
   const ok = !!row && code.length >= 20 &&
     timingSafeEqualStr(hexOf(await digestBytes(new TextEncoder().encode(code))), row.code_hash);
-  await recordFootprint(env, request, ip, 'login', ok, body.fp);
-  if (!ok) throw new HttpError(401, 'Kurtarma kodu hatali');
+  if (!ok) {
+    await recordFootprint(env, request, ip, 'login', false, body.fp);
+    throw new HttpError(401, 'Kurtarma kodu hatali');
+  }
+  // Tek kullanimlik: kodu ancak bir kez silebiliriz (ayni anda iki giris olursa biri kazanir)
+  const res = await env.DB.prepare("UPDATE recovery SET code_hash = '', blob = '' WHERE id = 1 AND code_hash = ?")
+    .bind(row.code_hash).run();
+  const consumed = !!(res && res.meta && res.meta.changes > 0);
+  await recordFootprint(env, request, ip, 'login', consumed, body.fp);
+  if (!consumed) throw new HttpError(401, 'Kurtarma kodu hatali veya kullanilmis');
   return json({ ok: true, blob: row.blob }, 200, { 'Set-Cookie': await passkeySessionCookie(request, env) });
 }
 
@@ -1427,7 +1436,7 @@ function recoveryMailHtml(displayCode) {
 </div>
 </td></tr>
 <tr><td style="padding:0 28px 8px 28px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#8a8a92;font-size:14px;line-height:1.7;">
-<p style="margin:0 0 10px 0;">Bu kod her kullanıldığında otomatik olarak yenilenir ve yeni kod size tekrar gönderilir. Eski kod geçersizdir.</p>
+<p style="margin:0 0 10px 0;">Bu kod tek kullanımlıktır. Kullanıldıktan sonra yeni kod yalnızca istediğinizde gönderilir.</p>
 <p style="margin:0;">Bu isteği siz yapmadıysanız kodu kimseyle paylaşmayın ve kasa parolanızı hemen değiştirin.</p>
 </td></tr>
 <tr><td style="padding:18px 28px 28px 28px;border-top:1px solid #1f1f22;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:12px;color:#5a5a62;">Rehber &middot; kişisel kontakt defteri</td></tr>
@@ -1449,7 +1458,7 @@ async function sendRecoveryMail(env, displayCode) {
       to: [env.RECOVERY_EMAIL],
       subject: 'Rehber kurtarma kodu',
       html: recoveryMailHtml(safe),
-      text: `Yeni kurtarma kodunuz:\n\n${safe}\n\nBu kod her kullanildiginda otomatik yenilenir. Eski kod gecersizdir. Kodu kimseyle paylasmayin.`,
+      text: `Yeni kurtarma kodunuz:\n\n${safe}\n\nBu kod tek kullanimliktir. Kodu kimseyle paylasmayin.`,
     }),
   });
   if (!res.ok) throw new Error('mail hatasi ' + res.status);
@@ -1457,9 +1466,33 @@ async function sendRecoveryMail(env, displayCode) {
 
 async function recoveryRotate(request, env) {
   const body = await readJson(request);
-  const displayCode = String(body.code || '');
+  return storeRecovery(env, body.code, body.blob);
+}
+
+async function recoverySend(request, env, ip) {
+  if ((await recentFailCount(env, ip)) >= MAX_FAILS) {
+    throw new HttpError(429, 'Cok fazla hatali deneme. Lutfen daha sonra tekrar deneyin.');
+  }
+  const body = await readJson(request);
+  if (!hasGeo(body)) {
+    await recordFootprint(env, request, ip, 'login_no_geo', false, body.fp);
+    throw new HttpError(403, 'Konum izni olmadan giris yapilamaz');
+  }
+  if (!(await verifyTurnstile(env, body.turnstile, ip))) {
+    await recordFootprint(env, request, ip, 'login_bot', false, body.fp);
+    throw new HttpError(403, 'Dogrulama basarisiz. Lutfen tekrar deneyin.');
+  }
+  const recent = await env.DB.prepare(
+    "SELECT 1 AS r FROM recovery WHERE id = 1 AND updated_at > datetime('now', '-2 minutes')"
+  ).first();
+  if (recent) throw new HttpError(429, 'Kod az once gonderildi. Birkac dakika bekleyin.');
+  return storeRecovery(env, body.code, body.blob);
+}
+
+async function storeRecovery(env, displayCodeIn, blobIn) {
+  const displayCode = String(displayCodeIn || '');
   const code = normalizeRecoveryCode(displayCode);
-  const blob = String(body.blob || '');
+  const blob = String(blobIn || '');
   if (code.length < 20 || code.length > 64 || blob.length < 20 || blob.length > 4000) {
     throw new HttpError(400, 'Gecersiz istek');
   }
