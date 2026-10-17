@@ -387,3 +387,12 @@ select option { background: #000; }
   .chip { padding: 6px 10px; font-size: .8rem; }
   .contact-card:active { transform: scale(.99) !important; }
 }
+
+/* Ayarlar: acilir gruplar */
+.set-stack { display: flex; flex-direction: column; gap: 10px; }
+.set-group { border-radius: 14px; background: rgba(127, 127, 127, 0.10); overflow: hidden; }
+.set-group > summary { cursor: pointer; padding: 14px 16px; font-weight: 600; list-style: none; display: flex; justify-content: space-between; align-items: center; }
+.set-group > summary::-webkit-details-marker { display: none; }
+.set-group > summary::after { content: '+'; opacity: 0.6; font-size: 18px; }
+.set-group[open] > summary::after { content: '\2212'; }
+.set-group > .graph-menu-list { padding: 0 12px 12px; }
