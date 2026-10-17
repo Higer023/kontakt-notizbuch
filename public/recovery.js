@@ -76,8 +76,25 @@
     return data;
   }
 
-  async function loginWithRecovery() {
-    const code = prompt('Kurtarma kodunu girin (e-postanizdaki kod):');
+  let awaitingCode = false;
+
+  // 1. adim: parolayi kullan, kod uret, e-postaya gonder
+  async function sendRecoveryCode(password) {
+    const turnstile = window.turnstile ? window.turnstile.getResponse() : '';
+    if (!turnstile) throw new Error('Lutfen dogrulamayi tamamlayin.');
+    $('#login-error').textContent = 'Konum izni isteniyor...';
+    const geo = await getGeo();
+    const fp = await getFingerprint(geo);
+    const code = newCode();
+    await postPlain('/api/recovery/send', { code, blob: await wrapPassword(code, password), fp, turnstile });
+    window.turnstile?.reset();
+    awaitingCode = true;
+    $('#login-error').textContent = 'Kurtarma kodu e-postaniza gonderildi. Dogrulamayi tekrar tamamlayip ayni dugmeye basin ve kodu girin.';
+  }
+
+  // 2. adim: e-postadaki kodu gir, tek kullanimlik giris
+  async function loginWithCode() {
+    const code = prompt('E-postanizdaki kurtarma kodunu girin:');
     if (!code) return;
     if (!normalize(code)) throw new Error('Kod bos.');
     const turnstile = window.turnstile ? window.turnstile.getResponse() : '';
@@ -91,17 +108,18 @@
     catch { throw new Error('Kurtarma kodu hatali.'); }
     try { await unlockVault(password); }
     catch (e) { await postPlain('/api/logout', {}).catch(() => {}); throw e; }
-
-    // Kod kullanildi: hemen yenisini uret, e-postaya gonder
-    const next = newCode();
-    try {
-      await api('/api/recovery/rotate', { method: 'POST', body: { code: next, blob: await wrapPassword(next, password) } });
-      alert('Giris yapildi. Kurtarma kodu yenilendi, yeni kod e-postaniza gonderildi. Eski kod artik gecersiz.');
-    } catch (e) {
-      alert('Giris yapildi ama kurtarma kodu yenilenemedi: ' + e.message + '. Eski kod hala gecerli.');
-    }
+    awaitingCode = false;
     $('#login-error').textContent = '';
     showApp();
+  }
+
+  async function loginWithRecovery() {
+    if (!awaitingCode) {
+      const password = $('#password').value;
+      if (!password) throw new Error('Once kasa parolasini girin, sonra kurtarma kodu isteyin.');
+      return sendRecoveryCode(password);
+    }
+    return loginWithCode();
   }
 
   async function requestRecoveryMail() {
