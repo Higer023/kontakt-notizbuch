@@ -1830,3 +1830,22 @@ $('#trash-open').addEventListener('click', () => {
   $('#trash-dialog').showModal();
 });
 $('#trash-close').addEventListener('click', () => $('#trash-dialog').close());
+
+// ---------- Uygulama olarak yukleme (PWA kurulumu) ----------
+let deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  $('#install-app').classList.remove('hidden');
+});
+$('#install-app').addEventListener('click', async () => {
+  if (!deferredInstallPrompt) return;
+  deferredInstallPrompt.prompt();
+  await deferredInstallPrompt.userChoice.catch(() => {});
+  deferredInstallPrompt = null;
+  $('#install-app').classList.add('hidden');
+});
+window.addEventListener('appinstalled', () => {
+  deferredInstallPrompt = null;
+  $('#install-app').classList.add('hidden');
+});
