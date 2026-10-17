@@ -1031,40 +1031,88 @@ function cityKey(value) {
 
 let mapInstance = null;
 
-function openMap() {
-  $('#map-dialog').showModal();
+// Harita penceresi: yerel tablo yoksa Photon'a SADECE sehir metni sorulur (isim gitmez). Sonuclar bellekte.
+const mapCityCache = new Map();
+let mapLayer = null, mapRun = 0;
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function geocodeCity(q) {
+  const key = cityKey(q);
+  if (CITY_COORDS[key]) return CITY_COORDS[key];
+  if (mapCityCache.has(key)) return mapCityCache.get(key);
+  const res = await fetch('https://photon.komoot.io/api/?limit=1&q=' + encodeURIComponent(q), {
+    credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store',
+  });
+  if (!res.ok) throw new Error('servis hatasi');
+  const data = await res.json();
+  const f = data.features && data.features[0];
+  const pos = f ? [f.geometry.coordinates[1], f.geometry.coordinates[0]] : null;
+  mapCityCache.set(key, pos);
+  return pos;
+}
+
+function renderMapView(people, coords, busyText) {
+  const located = people.filter((p) => coords.get(p.city));
+  const missing = [...new Set(people.filter((p) => !coords.get(p.city)).map((p) => p.city))];
   const list = $('#map-list');
-  if (typeof L === 'undefined') {
-    list.innerHTML = '<div class="empty">Harita kutuphanesi yuklenemedi. Internet baglantinizi kontrol edin.</div>';
-    return;
-  }
-  const located = [];
-  const missing = [];
-  for (const c of contacts) {
-    const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Isimsiz';
-    if (!c.city) continue;
-    const pos = CITY_COORDS[cityKey(c.city)];
-    if (pos) located.push({ name, city: c.city, pos });
-    else missing.push({ name, city: c.city });
-  }
   list.innerHTML = located.length
     ? located.map((p) => `<div>${esc(p.name)} <span class="muted">· ${esc(p.city)}</span></div>`).join('')
-      + (missing.length ? `<p class="muted">Konumu bulunamayan sehirler: ${missing.map((m) => esc(m.city)).join(', ')}</p>` : '')
     : '<div class="empty">Konumu bulunabilen kisi yok.</div>';
+  if (busyText) list.innerHTML += `<p class="muted">${esc(busyText)}</p>`;
+  else if (missing.length) list.innerHTML += `<p class="muted">Konumu bulunamayan: ${missing.map(esc).join(', ')}</p>`;
 
-  setTimeout(() => {
-    if (mapInstance) { mapInstance.remove(); mapInstance = null; }
+  if (!mapInstance) {
     mapInstance = L.map('map-box').setView([39.0, 35.0], 5);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 18,
-      attribution: '&copy; OpenStreetMap',
+      maxZoom: 18, attribution: '&copy; OpenStreetMap',
     }).addTo(mapInstance);
-    located.forEach((p) => {
-      L.circleMarker(p.pos, { radius: 6 }).bindPopup(`${esc(p.name)} · ${esc(p.city)}`).addTo(mapInstance);
-    });
-    if (located.length) mapInstance.fitBounds(located.map((p) => p.pos), { padding: [30, 30], maxZoom: 10 });
-    mapInstance.invalidateSize();
-  }, 50);
+    mapLayer = L.layerGroup().addTo(mapInstance);
+  }
+  mapLayer.clearLayers();
+  located.forEach((p) => {
+    L.circleMarker(coords.get(p.city), { radius: 6 })
+      .bindPopup(`${esc(p.name)} · ${esc(p.city)}`).addTo(mapLayer);
+  });
+  mapInstance.invalidateSize();
+  if (located.length) mapInstance.fitBounds(located.map((p) => coords.get(p.city)), { padding: [30, 30], maxZoom: 10 });
+}
+
+async function openMap() {
+  $('#map-dialog').showModal();
+  if (typeof L === 'undefined') {
+    $('#map-list').innerHTML = '<div class="empty">Harita kutuphanesi yuklenemedi. Internet baglantinizi kontrol edin.</div>';
+    return;
+  }
+  const run = ++mapRun;
+  if (mapInstance) { mapInstance.remove(); mapInstance = null; mapLayer = null; }
+  const people = contacts
+    .filter((c) => c.city && String(c.city).trim())
+    .map((c) => ({
+      name: [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Isimsiz',
+      city: String(c.city).trim(),
+    }));
+  const cities = [...new Set(people.map((p) => p.city))];
+  const coords = new Map();
+  for (const city of cities) {
+    const local = CITY_COORDS[cityKey(city)];
+    if (local) coords.set(city, local);
+  }
+  const pending = cities.filter((c) => !coords.has(c));
+
+  await sleepMs(60);
+  renderMapView(people, coords, pending.length ? `Diger konumlar araniyor (0/${pending.length})...` : '');
+
+  for (let k = 0; k < pending.length; k++) {
+    await sleepMs(1100);
+    if (run !== mapRun) return;
+    try {
+      const pos = await geocodeCity(pending[k]);
+      if (pos) coords.set(pending[k], pos);
+    } catch { /* bulunamadi ya da hata: listede "bulunamayan" olarak gorunur */ }
+    if (run !== mapRun) return;
+    const busy = k + 1 < pending.length ? `Diger konumlar araniyor (${k + 1}/${pending.length})...` : '';
+    renderMapView(people, coords, busy);
+  }
 }
 $('#map-close').addEventListener('click', () => $('#map-dialog').close());
 
