@@ -330,3 +330,60 @@ dialog.graph-sheet .sheet-body { height: 100dvh; max-height: 100dvh; border-radi
 /* Alt bar: sadece hamburger ve ekle dugmesi gorunur */
 .tabbar { display: flex; justify-content: center; align-items: center; gap: 16px; }
 .menu-open { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; padding: 0; font-size: 1.3rem; color: var(--ink); }
+
+
+/* ===== Tema: tam karanlik, pastel kirik beyaz vurgular, mobilde sade ===== */
+:root {
+  --bg: #000000;
+  --ink: #f2efe8;
+  --ink-soft: #9c978c;
+  --glass: #050505;
+  --glass-strong: #000000;
+  --line: rgba(242, 239, 232, 0.08);
+  --line-strong: rgba(242, 239, 232, 0.18);
+  --shadow: none;
+  --mint: #e8e2d4;
+  --lavender: #e8e2d4;
+  --accent: #ece6d8;
+  --danger: #e8b4b0;
+  --ok: #d9e4d2;
+  --radius: 18px;
+  color-scheme: dark;
+}
+body { background: #000; }
+.bg, .blob { display: none !important; }
+.glass {
+  background: #050505;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+  border-color: var(--line);
+}
+.contact-card { background: #060606; border: 1px solid var(--line); }
+.contact-card::after { display: none; }
+@media (hover: hover) { .contact-card:hover { border-color: var(--line-strong); } }
+input, textarea, select { background: #0a0a0a; border-color: var(--line); }
+input:focus, textarea:focus, select:focus {
+  background: #0e0e0e; border-color: rgba(236, 230, 216, 0.45); box-shadow: 0 0 0 3px rgba(236, 230, 216, 0.08);
+}
+input::placeholder, textarea::placeholder { color: #5a574f; }
+select option { background: #000; }
+.btn-primary { background: #ece6d8; color: #000; }
+.btn-danger { background: rgba(232, 180, 176, 0.08); color: var(--danger); }
+.tag { background: transparent; border-color: var(--line-strong); color: var(--ink-soft); }
+.notes { color: #bdb8ac; }
+.chip { background: #0a0a0a; }
+
+/* Mobil: daha az kalabalik */
+@media (max-width: 640px) {
+  main { padding: 6px 12px 130px; }
+  .largebar h1 { font-size: 1.6rem; }
+  .contact-card { padding: 12px; gap: 8px; animation: none; }
+  .contact-card .tags, .contact-card .notes { display: none; }
+  .avatar { width: 42px; height: 42px; font-size: 1rem; }
+  .contact-name { font-size: .98rem; }
+  .toolbar { gap: 8px; }
+  .toolbar select, .toolbar .select { padding: 9px 12px; font-size: 14px; }
+  .chip { padding: 6px 10px; font-size: .8rem; }
+  .contact-card:active { transform: scale(.99) !important; }
+}
