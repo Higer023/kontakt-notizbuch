@@ -1,5 +1,5 @@
-const CACHE = 'rehber-shell-v3';
-const SHELL = ['/', '/index.html', '/style.css', '/app.js', '/push.js', '/crypto.js', '/icon.svg', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png'];
+const CACHE = 'rehber-shell-v4';
+const SHELL = ['/', '/index.html', '/style.css', '/app.js', '/push.js', '/crypto.js', '/icon.svg', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/badge-96.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -24,19 +24,61 @@ self.addEventListener('fetch', (e) => {
   );
 });
 
-// Push: sunucu bos istek gonderir, metin burada yazilir.
+// Push: sunucu bos istek gonderir. Ayrintilar kuyruktan (sadece sayilar) okunur.
 self.addEventListener('push', (e) => {
-  e.waitUntil(self.registration.showNotification('Rehber', {
-    body: 'Yeni bir bildiriminiz var.',
-    tag: 'rehber-push',
-    icon: '/icons/icon-192.png',
-    badge: '/icons/icon-192.png',
-  }));
+  e.waitUntil(showDigest());
 });
+
+async function showDigest() {
+  let items = [];
+  try {
+    const r = await fetch('/api/push/pending', { credentials: 'same-origin' });
+    if (r.ok) items = (await r.json()).items || [];
+  } catch { /* ag yok: genel bildirim */ }
+
+  const bday = items.find((i) => i.type === 'birthday' && i.count > 0);
+  let title = 'Rehber';
+  let body = 'Yeni bir bildiriminiz var.';
+  let tag = 'rehber-general';
+  let url = '/';
+  if (bday) {
+    title = 'Yaklasan dogum gunleri';
+    body = bday.count === 1
+      ? '1 kisinin dogum gunu 7 gun icinde.'
+      : bday.count + ' kisinin dogum gunu 7 gun icinde.';
+    tag = 'rehber-birthday';
+    url = '/?open=birthdays';
+  }
+
+  await self.registration.showNotification(title, {
+    body,
+    tag,
+    renotify: true,
+    timestamp: Date.now(),
+    icon: '/icons/icon-512.png',
+    badge: '/icons/badge-96.png',
+    vibrate: [80, 40, 80],
+    data: { url },
+    actions: [{ action: 'open', title: 'Ac' }],
+  });
+
+  if (bday) {
+    try {
+      await fetch('/api/push/consume', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+    } catch { /* bir sonraki kontrolde tekrar denenir */ }
+  }
+}
+
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || '/';
   e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
     if (list.length) return list[0].focus();
-    return self.clients.openWindow('/');
+    return self.clients.openWindow(url);
   }));
 });
