@@ -396,3 +396,111 @@ select option { background: #000; }
 .set-group > summary::after { content: '+'; opacity: 0.6; font-size: 18px; }
 .set-group[open] > summary::after { content: '\2212'; }
 .set-group > .graph-menu-list { padding: 0 12px 12px; }
+
+/* ===== Buton sistemi: tek stil, net ve tutarli (tum temalar) ===== */
+:root {
+  --btn-h: 48px;
+  --btn-radius: 16px;
+  --btn-bg: rgba(255, 255, 255, 0.08);
+  --btn-bg-hover: rgba(255, 255, 255, 0.14);
+  --btn-line: rgba(255, 255, 255, 0.18);
+  --btn-ink: var(--ink);
+  --btn-primary-bg: var(--accent);
+  --btn-primary-ink: #0a0a0b;
+  --btn-danger-bg: rgba(255, 163, 171, 0.12);
+  --btn-danger-line: rgba(255, 163, 171, 0.40);
+}
+:root[data-theme="light"] {
+  --btn-bg: rgba(0, 0, 0, 0.05);
+  --btn-bg-hover: rgba(0, 0, 0, 0.10);
+  --btn-line: rgba(0, 0, 0, 0.18);
+  --btn-ink: #111114;
+  --btn-danger-bg: rgba(194, 51, 74, 0.08);
+  --btn-danger-line: rgba(194, 51, 74, 0.35);
+}
+
+button { font-family: inherit; }
+button:focus-visible { outline: 2px solid var(--btn-ink); outline-offset: 2px; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Ikincil butonlar (glass sinifi ve menu listeleri) */
+button.glass,
+.graph-menu-list button {
+  min-height: var(--btn-h);
+  padding: 12px 18px;
+  border-radius: var(--btn-radius);
+  background: var(--btn-bg);
+  border: 1px solid var(--btn-line);
+  color: var(--btn-ink);
+  font-size: 0.98rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  transition: background 0.15s, transform 0.12s, border-color 0.15s;
+}
+button.glass:hover,
+.graph-menu-list button:hover { background: var(--btn-bg-hover); }
+button.glass:active,
+.graph-menu-list button:active { transform: scale(0.98); }
+.graph-menu-list button { width: 100%; text-align: left; }
+
+/* Ana eylem */
+.btn-primary {
+  min-height: var(--btn-h);
+  padding: 12px 18px;
+  border-radius: var(--btn-radius);
+  border: none;
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-ink);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  box-shadow: 0 8px 24px -12px rgba(181, 234, 215, 0.55);
+  transition: transform 0.12s, opacity 0.15s;
+}
+.btn-primary:hover { opacity: 0.94; }
+.btn-primary:active { transform: scale(0.97); }
+
+/* Tehlikeli eylem (cikis, silme) */
+.btn-danger {
+  min-height: var(--btn-h);
+  padding: 12px 18px;
+  border-radius: var(--btn-radius);
+  background: var(--btn-danger-bg);
+  border: 1px solid var(--btn-danger-line);
+  color: var(--danger);
+  font-size: 0.98rem;
+  font-weight: 700;
+}
+.btn-danger:hover { filter: brightness(1.08); }
+
+/* Hayalet: ikincil metin butonu */
+.btn-ghost {
+  min-height: var(--btn-h);
+  padding: 12px 16px;
+  border-radius: var(--btn-radius);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+/* Kucuk kapsul butonlar */
+.pill {
+  min-height: 38px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--btn-line);
+  background: var(--btn-bg);
+  color: var(--btn-ink);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.pill.small { min-height: 32px; padding: 6px 12px; font-size: 0.82rem; }
+
+/* Acilir gruplar: ayni baslik stili */
+.set-group { border: 1px solid var(--btn-line); background: var(--btn-bg); }
+.set-group > summary { min-height: var(--btn-h); font-size: 0.98rem; color: var(--btn-ink); }
+.set-group > .graph-menu-list { gap: 8px; }
