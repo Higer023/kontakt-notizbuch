@@ -1152,7 +1152,7 @@ function summaryHtml(all) {
 }
 
 function openSummary() {
-  $('#summary-box').innerHTML = summaryHtml(buildViews()) + birthdaysHtml();
+  $('#summary-box').innerHTML = summaryHtml(buildViews()) + birthdaysHtml() + duplicatesHtml();
   $('#summary-dialog').showModal();
 }
 $('#summary-close').addEventListener('click', () => $('#summary-dialog').close());
@@ -1603,3 +1603,151 @@ function exportBirthdaysIcs() {
   downloadText(ics, `dogum-gunleri-${stampDate()}.ics`, 'text/calendar;charset=utf-8');
 }
 $('#export-ics').addEventListener('click', exportBirthdaysIcs);
+
+// ---------- Kisi ice aktarma: vCard (.vcf) ve Google Kisiler CSV ----------
+function parseBday(s) {
+  s = String(s || '').trim();
+  let m = s.match(/^(\d{4})-?(\d{2})-?(\d{2})/);
+  if (m) return { birth_year: +m[1], birth_month: +m[2], birth_day: +m[3] };
+  m = s.match(/^--(\d{2})-?(\d{2})/);
+  if (m) return { birth_year: null, birth_month: +m[1], birth_day: +m[2] };
+  return {};
+}
+function vcfUnescape(v) { return String(v || '').replace(/\\n/gi, '\n').replace(/\\([,;\\])/g, '$1'); }
+function parseVcf(text) {
+  const lines = text.replace(/\r?\n[ \t]/g, '').split(/\r?\n/);
+  const cards = [];
+  let cur = null;
+  for (const line of lines) {
+    if (/^BEGIN:VCARD/i.test(line)) { cur = {}; continue; }
+    if (/^END:VCARD/i.test(line)) { if (cur) cards.push(cur); cur = null; continue; }
+    if (!cur) continue;
+    const idx = line.indexOf(':');
+    if (idx < 0) continue;
+    const key = line.slice(0, idx).split(';')[0].toUpperCase();
+    if (!(key in cur)) cur[key] = line.slice(idx + 1);
+  }
+  return cards.map((c) => {
+    const n = (c.N || '').split(';');
+    const adr = (c.ADR || '').split(';');
+    return {
+      first_name: vcfUnescape(n[1]) || vcfUnescape((c.FN || '').split(' ')[0]),
+      last_name: vcfUnescape(n[0]),
+      phone: vcfUnescape(c.TEL), email: vcfUnescape(c.EMAIL),
+      city: vcfUnescape(adr[3]),
+      ...parseBday(c.BDAY),
+      occupation: vcfUnescape(c.TITLE), group_name: vcfUnescape((c.ORG || '').split(';')[0]),
+      notes: vcfUnescape(c.NOTE), website: vcfUnescape(c.URL),
+    };
+  });
+}
+function parseCsvText(text) {
+  const rows = [];
+  let row = [], field = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) {
+      if (ch === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else q = false; }
+      else field += ch;
+    } else if (ch === '"') q = true;
+    else if (ch === ',') { row.push(field); field = ''; }
+    else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && text[i + 1] === '\n') i++;
+      row.push(field); rows.push(row); row = []; field = '';
+    } else field += ch;
+  }
+  if (field || row.length) { row.push(field); rows.push(row); }
+  return rows.filter((r) => r.some((x) => x.trim()));
+}
+function parseGoogleCsv(text) {
+  const rows = parseCsvText(text.replace(/^\uFEFF/, ''));
+  if (rows.length < 2) return [];
+  const head = rows[0].map((h) => h.trim());
+  const col = (re) => head.map((h, i) => (re.test(h) ? i : -1)).filter((i) => i >= 0);
+  const C = {
+    first: col(/^(First Name|Given Name)$/), last: col(/^(Last Name|Family Name)$/), nick: col(/^Nickname$/),
+    phone: col(/^Phone \d+ - Value$/), email: col(/^E-mail \d+ - Value$/), bday: col(/^Birthday$/),
+    notes: col(/^Notes$/), org: col(/^Organization \d+ - Name$/), title: col(/^Organization \d+ - Title$/),
+    city: col(/^Address \d+ - City$/), web: col(/^Website \d+ - Value$/),
+  };
+  const pick = (r, idxs) => { for (const i of idxs) { const v = (r[i] || '').trim(); if (v) return v; } return ''; };
+  return rows.slice(1).map((r) => ({
+    first_name: pick(r, C.first), last_name: pick(r, C.last), nickname: pick(r, C.nick),
+    phone: pick(r, C.phone), email: pick(r, C.email), ...parseBday(pick(r, C.bday)),
+    notes: pick(r, C.notes), group_name: pick(r, C.org), occupation: pick(r, C.title),
+    city: pick(r, C.city), website: pick(r, C.web),
+  }));
+}
+function toImportRecord(p) {
+  const cut = (v, n) => String(v || '').trim().slice(0, n);
+  const yr = new Date().getFullYear();
+  const y = p.birth_year, mo = p.birth_month, d = p.birth_day;
+  const phone = cut(p.phone, 30), email = cut(p.email, 254), website = cut(p.website, 300);
+  return {
+    first_name: cut(p.first_name, 100), last_name: cut(p.last_name, 100), nickname: cut(p.nickname, 60),
+    birth_year: Number.isInteger(y) && y >= 1900 && y <= yr ? y : null,
+    birth_month: Number.isInteger(mo) && mo >= 1 && mo <= 12 ? mo : null,
+    birth_day: Number.isInteger(d) && d >= 1 && d <= 31 ? d : null,
+    birthplace: '', city: cut(p.city, 100), school: '', group_name: cut(p.group_name, 60),
+    occupation: cut(p.occupation, 100), how_we_met: '',
+    phone: phone && PHONE_RE.test(phone) ? phone : '',
+    email: email && EMAIL_RE.test(email) ? email : '',
+    website: website && /^https?:\/\//i.test(website) ? website : '',
+    socials: [], extra: [], notes: cut(p.notes, 5000), tags: '', relations: [],
+  };
+}
+async function importContactsFile(file) {
+  const text = await file.text();
+  const parsed = /BEGIN:VCARD/i.test(text) ? parseVcf(text) : parseGoogleCsv(text);
+  if (!parsed.length) { alert('Dosyada kisi bulunamadi.'); return; }
+  if (!confirm(`${parsed.length} kayit okundu. Eklensin mi? Telefon/e-posta gecersizse o alan bos eklenir, isim yoksa kayit atlanir.`)) return;
+  let ok = 0, skipped = 0;
+  for (const p of parsed) {
+    const rec = toImportRecord(p);
+    if (!rec.first_name) { skipped++; continue; }
+    try { validate(rec); await persist(null, rec); ok++; }
+    catch { skipped++; }
+  }
+  await loadContacts();
+  alert(`${ok} kisi eklendi, ${skipped} kayit atlandi.`);
+}
+$('#import-contacts').addEventListener('click', () => {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.vcf,.csv,text/vcard,text/csv';
+  input.addEventListener('change', () => {
+    if (input.files && input.files[0]) importContactsFile(input.files[0]).catch(alertError);
+  });
+  input.click();
+});
+
+// ---------- Olasi yinelenen kayitlar (sadece listeler; birlestirmez) ----------
+function duplicatesHtml() {
+  const groups = new Map();
+  contacts.forEach((c, i) => {
+    const keys = [];
+    const digits = String(c.phone || '').replace(/\D/g, '');
+    if (digits.length >= 7) keys.push('p:' + digits.slice(-9));
+    if (c.email) keys.push('e:' + String(c.email).trim().toLowerCase());
+    const f = String(c.first_name || '').trim(), l = String(c.last_name || '').trim();
+    if (f && l) keys.push('n:' + f.toLocaleLowerCase('tr') + '|' + l.toLocaleLowerCase('tr'));
+    for (const k of keys) {
+      if (!groups.has(k)) groups.set(k, new Set());
+      groups.get(k).add(i);
+    }
+  });
+  const seen = new Set();
+  const out = [];
+  for (const set of groups.values()) {
+    if (set.size < 2) continue;
+    const idxs = [...set].sort((a, b) => a - b);
+    const sig = idxs.join(',');
+    if (seen.has(sig)) continue;
+    seen.add(sig);
+    out.push(idxs.map((i) => fullName(contacts[i]) || contacts[i].first_name).join(' · '));
+  }
+  const head = '<h3>Olasi yinelenen kayitlar</h3>';
+  if (!out.length) return head + '<div class="empty">Yinelenen kayit bulunamadi.</div>';
+  return head + out.map((t) => `<div>${esc(t)}</div>`).join('')
+    + '<p class="muted">Ayni telefon, e-posta ya da ad-soyad eslesmesine gore listelenir. Birlestirme yapilmaz; kayitlari kontrol edip gerekirse kendiniz duzenleyin.</p>';
+}
