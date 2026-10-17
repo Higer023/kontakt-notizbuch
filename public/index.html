@@ -24,6 +24,8 @@
       <input type="password" id="password" placeholder="Sifre" autocomplete="current-password" required>
       <p id="password-hint" class="muted" style="font-size:12px;margin:0">Ipucu: _</p>
       <div class="cf-turnstile" data-sitekey="0x4AAAAAAFWHrfVQBQ0eBkIP" data-theme="dark"></div>
+        <button type="button" id="passkey-login" class="glass">Parmak izi ile giris</button>
+        <p class="muted" style="font-size:12px;margin:0">Parmak izi icin once kasa parolasini yazin.</p>
       <button type="submit" class="btn-primary">Konum izniyle giris yap</button>
       <p id="login-error" class="error" role="alert"></p>
     </form>
@@ -132,19 +134,46 @@
     <div class="sheet-body form">
       <div class="sheet-grip"></div>
       <div class="section-title"><h2>Ayarlar</h2><button type="button" id="settings-close" class="pill glass small">Kapat</button></div>
-      <div class="graph-menu-list">
-        <button type="button" id="theme-btn" class="glass">Tema degistir (acik / koyu)</button>
-        <button type="button" id="install-app" class="glass hidden">Uygulama olarak yukle</button>
-        <button type="button" id="notify-enable" class="glass">Dogum gunu bildirimlerini ac</button>
-        <button type="button" id="sessions-open" class="glass">Acik oturumlar</button>
-        <button type="button" id="trash-open" class="glass">Cop kutusu (30 gun)</button>
-        <button type="button" id="import-contacts" class="glass">Kisi ice aktar (.vcf / Google .csv)</button>
-        <button type="button" id="export-ics" class="glass">Dogum gunu takvimi (.ics)</button>
-        <button type="button" id="export-json" class="glass">Yedekle (JSON, sifresiz)</button>
-        <button type="button" id="export-csv" class="glass">Disa aktar (CSV, sifresiz)</button>
-<button type="button" id="push-enable" class="glass">Bildirimleri ac</button>
-<button type="button" id="push-test" class="glass">Test bildirimi gonder</button>
-        <button type="button" id="logout-btn" class="glass btn-danger">Cikis yap</button>
+      <div class="set-stack">
+        <details class="set-group" open>
+          <summary>Hesap ve guvenlik</summary>
+          <div class="graph-menu-list">
+            <button type="button" id="passkey-add" class="glass">Parmak izi ekle (bu cihaz)</button>
+            <button type="button" id="passkey-manage" class="glass">Kayitli parmak izlerini yonet</button>
+            <button type="button" id="sessions-open" class="glass">Acik oturumlar</button>
+            <button type="button" id="logout-btn" class="glass btn-danger">Cikis yap</button>
+          </div>
+        </details>
+        <details class="set-group">
+          <summary>Gorunum ve uygulama</summary>
+          <div class="graph-menu-list">
+            <button type="button" id="theme-btn" class="glass">Tema degistir (acik / koyu)</button>
+            <button type="button" id="install-app" class="glass hidden">Uygulama olarak yukle</button>
+          </div>
+        </details>
+        <details class="set-group">
+          <summary>Bildirimler</summary>
+          <div class="graph-menu-list">
+            <button type="button" id="notify-enable" class="glass">Dogum gunu bildirimlerini ac</button>
+            <button type="button" id="push-enable" class="glass">Bildirimleri ac</button>
+            <button type="button" id="push-test" class="glass">Test bildirimi gonder</button>
+          </div>
+        </details>
+        <details class="set-group">
+          <summary>Kisiler</summary>
+          <div class="graph-menu-list">
+            <button type="button" id="import-contacts" class="glass">Kisi ice aktar (.vcf / Google .csv)</button>
+            <button type="button" id="trash-open" class="glass">Cop kutusu (30 gun)</button>
+          </div>
+        </details>
+        <details class="set-group">
+          <summary>Yedek ve disa aktarim</summary>
+          <div class="graph-menu-list">
+            <button type="button" id="export-ics" class="glass">Dogum gunu takvimi (.ics)</button>
+            <button type="button" id="export-json" class="glass">Yedekle (JSON, sifresiz)</button>
+            <button type="button" id="export-csv" class="glass">Disa aktar (CSV, sifresiz)</button>
+          </div>
+        </details>
       </div>
     </div>
   </dialog>
@@ -313,6 +342,7 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin=""></script>
   <script src="/crypto.js"></script>
   <script src="/push.js" defer></script>
+<script src="/passkey.js" defer></script>
 <script src="/app.js" defer></script>
 </body>
 </html>
