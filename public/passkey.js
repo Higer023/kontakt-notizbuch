@@ -100,6 +100,8 @@
     const geo = await getGeo();
     const fp = await getFingerprint(geo);
     await postPlain('/api/passkey/login/verify', {
+      username: $('#username').value,
+      password,
       assertion: {
         id: a.id,
         response: {
