@@ -96,6 +96,7 @@ async function handleApi(request, env, url) {
   if (pathname === '/api/logout' && method === 'POST') return logout(request, env);
   if (pathname === '/api/passkey/login/options' && method === 'POST') return passkeyLoginOptions(env, url);
   if (pathname === '/api/passkey/login/verify' && method === 'POST') return passkeyLogin(request, env, ip, url);
+  if (pathname === '/api/recovery/login' && method === 'POST') return recoveryLogin(request, env, ip, url);
 
   const session = await requireSession(request, env);
   if (!session) throw new HttpError(401, 'Yetkisiz');
@@ -109,6 +110,7 @@ async function handleApi(request, env, url) {
   if (pathname === '/api/passkey/register/verify' && method === 'POST') { requireFresh(); return passkeyRegisterVerify(request, env, url); }
   if (pathname === '/api/passkey/list' && method === 'GET') return passkeyList(env);
   if (pathname === '/api/passkey/delete' && method === 'POST') { requireFresh(); return passkeyDelete(request, env); }
+  if (pathname === '/api/recovery/rotate' && method === 'POST') { requireFresh(); return recoveryRotate(request, env); }
   if (pathname.startsWith('/api/push/')) return handlePush(request, env, url, { readJson, json, HttpError });
   // Kayitlar ve IP listesi sifreli: okumak icin yeniden parola gerekir
   if (pathname === '/api/logs' && method === 'GET') {
@@ -1363,5 +1365,74 @@ async function passkeyDelete(request, env) {
   const id = String(body.id || '');
   if (!id) throw new HttpError(400, 'Gecersiz istek');
   await env.DB.prepare('DELETE FROM webauthn_credentials WHERE id = ?').bind(id).run();
+  return json({ ok: true });
+}
+
+// ---- Kurtarma kodu ----
+// Kod e-postaya gonderilir; sunucu yalnizca kodun SHA-256 ozetini ve kodla sifrelenmis parolayi tutar.
+function normalizeRecoveryCode(s) {
+  return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function hexOf(bytes) {
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function recoveryLogin(request, env, ip, url) {
+  if ((await recentFailCount(env, ip)) >= MAX_FAILS) {
+    throw new HttpError(429, 'Cok fazla hatali deneme. Lutfen daha sonra tekrar deneyin.');
+  }
+  const body = await readJson(request);
+  if (!hasGeo(body)) {
+    await recordFootprint(env, request, ip, 'login_no_geo', false, body.fp);
+    throw new HttpError(403, 'Konum izni olmadan giris yapilamaz');
+  }
+  if (!(await verifyTurnstile(env, body.turnstile, ip))) {
+    await recordFootprint(env, request, ip, 'login_bot', false, body.fp);
+    throw new HttpError(403, 'Dogrulama basarisiz. Lutfen tekrar deneyin.');
+  }
+  const code = normalizeRecoveryCode(body.code);
+  const row = await env.DB.prepare('SELECT code_hash, blob FROM recovery WHERE id = 1').first();
+  const ok = !!row && code.length >= 20 &&
+    timingSafeEqualStr(hexOf(await digestBytes(new TextEncoder().encode(code))), row.code_hash);
+  await recordFootprint(env, request, ip, 'login', ok, body.fp);
+  if (!ok) throw new HttpError(401, 'Kurtarma kodu hatali');
+  return json({ ok: true, blob: row.blob }, 200, { 'Set-Cookie': await passkeySessionCookie(request, env) });
+}
+
+async function sendRecoveryMail(env, displayCode) {
+  if (!env.RESEND_API_KEY || !env.RECOVERY_EMAIL) throw new Error('mail yapilandirilmamis');
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: 'Rehber <onboarding@resend.dev>',
+      to: [env.RECOVERY_EMAIL],
+      subject: 'Rehber kurtarma kodu',
+      text: `Yeni kurtarma kodunuz:\n\n${displayCode}\n\nBu kod her kullanildiginda otomatik yenilenir. Eski kod gecersizdir. Kodu kimseyle paylasmayin.`,
+    }),
+  });
+  if (!res.ok) throw new Error('mail hatasi ' + res.status);
+}
+
+async function recoveryRotate(request, env) {
+  const body = await readJson(request);
+  const displayCode = String(body.code || '');
+  const code = normalizeRecoveryCode(displayCode);
+  const blob = String(body.blob || '');
+  if (code.length < 20 || code.length > 64 || blob.length < 20 || blob.length > 4000) {
+    throw new HttpError(400, 'Gecersiz istek');
+  }
+  try {
+    await sendRecoveryMail(env, displayCode);
+  } catch {
+    // Mail gitmediyse eski kod degismez; kullanici tekrar deneyebilir
+    throw new HttpError(502, 'E-posta gonderilemedi. Kurtarma kodu degistirilmedi.');
+  }
+  const hash = hexOf(await digestBytes(new TextEncoder().encode(code)));
+  await env.DB.prepare(
+    "INSERT INTO recovery (id, code_hash, blob, updated_at) VALUES (1, ?, ?, datetime('now')) " +
+    "ON CONFLICT(id) DO UPDATE SET code_hash = excluded.code_hash, blob = excluded.blob, updated_at = excluded.updated_at"
+  ).bind(hash, blob).run();
   return json({ ok: true });
 }
