@@ -1421,3 +1421,12 @@ for (const [name, lat, lng] of DE_CITIES) CITY_COORDS[cityKey(name)] = [lat, lng
   const seen = new Set(DE_CITIES.map(([n]) => n));
   dl.innerHTML += DE_CITIES.filter(([n]) => seen.has(n)).map(([name]) => `<option value="${esc(name)}"></option>`).join('');
 })();
+
+// ---------- Konum: Wetzlar ve Verden cevresi (yaklasik koordinatlar) ----------
+const REGION_CITIES = [["Wetzlar", 50.5526, 8.5047], ["Aßlar", 50.6172, 8.3658], ["Solms", 50.4956, 8.4247], ["Braunfels", 50.5236, 8.3614], ["Leun", 50.5, 8.3333], ["Ehringshausen", 50.6, 8.4], ["Lahnau", 50.6, 8.6], ["Hüttenberg", 50.6, 8.5], ["Herborn", 50.6847, 8.3088], ["Dillenburg", 50.7393, 8.2904], ["Haiger", 50.7237, 8.2118], ["Waldsolms", 50.42, 8.45], ["Biebertal", 50.65, 8.6], ["Greifenstein", 50.6, 8.2], ["Butzbach", 50.4325, 8.6679], ["Weilburg", 50.4837, 8.2658], ["Limburg an der Lahn", 50.3867, 8.0592], ["Lollar", 50.5222, 8.6297], ["Hungen", 50.4, 8.8], ["Wettenberg", 50.6, 8.68], ["Langgöns", 50.5, 8.7], ["Heuchelheim", 50.6, 8.7], ["Pohlheim", 50.6, 8.8], ["Reiskirchen", 50.5, 8.8], ["Schöffengrund", 50.5, 8.5], ["Sinn", 50.6, 8.4], ["Runkel", 50.4, 8.1], ["Verden", 52.9231, 9.2328], ["Achim", 53.0213, 9.0236], ["Oyten", 53.0, 8.99], ["Dörverden", 52.8, 9.2], ["Kirchlinteln", 52.9, 9.4], ["Langwedel", 52.8, 9.3], ["Thedinghausen", 52.9, 8.9], ["Ottersberg", 53.1, 9.1], ["Rethem", 52.8, 9.5], ["Hodenhagen", 52.9, 9.7], ["Walsrode", 52.8, 9.6], ["Syke", 52.9, 8.8], ["Weyhe", 52.99, 8.8], ["Eystrup", 52.8, 9.2]];
+for (const [name, lat, lng] of REGION_CITIES) CITY_COORDS[cityKey(name)] = [lat, lng];
+(function addRegionOptions() {
+  const dl = document.getElementById('city-options');
+  if (!dl) return;
+  dl.innerHTML += REGION_CITIES.map(([name]) => `<option value="${esc(name)}"></option>`).join('');
+})();
