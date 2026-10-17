@@ -50,6 +50,10 @@ class HttpError extends Error {
 }
 
 export default {
+  // Gunluk ozet: bekleyen kuyruk varsa abonelere bos push gonderilir.
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(sendDigest(env));
+  },
   async fetch(request, env) {
     const url = new URL(request.url);
     try {
@@ -968,6 +972,7 @@ function unb64(s) {
 const VAPID_PUBLIC_KEY = 'BDUEFNLqLZF73Kdtu7qk2UbUeraEnY4dcGHKcc1hggyx2kUmcCrmRInALuCFosTcLMDwZctKKJWTZwQNBssqwH4';
 const VAPID_SUBJECT = 'https://kontakt-notizbuch.halilgercek023.workers.dev';
 const MAX_SUBSCRIPTIONS = 10;
+const QUEUE_TYPES = ['birthday'];
 
 async function handlePush(request, env, url, deps) {
   const { readJson, json, HttpError } = deps;
@@ -1023,6 +1028,34 @@ async function handlePush(request, env, url, deps) {
     return json({ ok: true, sent, removed });
   }
 
+  if (pathname === '/api/push/queue' && method === 'POST') {
+    const body = await readJson(request);
+    const type = String(body.type || '');
+    const count = Number(body.count);
+    if (!QUEUE_TYPES.includes(type) || !Number.isInteger(count) || count < 0 || count > 999) {
+      throw new HttpError(400, 'Gecersiz kuyruk kaydi');
+    }
+    if (count === 0) {
+      await env.DB.prepare('DELETE FROM notify_queue WHERE type = ?').bind(type).run();
+    } else {
+      await env.DB.prepare(
+        "INSERT INTO notify_queue (type, count, updated_at) VALUES (?, ?, datetime('now')) " +
+        "ON CONFLICT(type) DO UPDATE SET count = excluded.count, updated_at = excluded.updated_at"
+      ).bind(type, count).run();
+    }
+    return json({ ok: true });
+  }
+
+  if (pathname === '/api/push/pending' && method === 'GET') {
+    const rows = await env.DB.prepare('SELECT type, count FROM notify_queue').all();
+    return json({ items: rows.results || [] });
+  }
+
+  if (pathname === '/api/push/consume' && method === 'POST') {
+    await env.DB.prepare('DELETE FROM notify_queue').run();
+    return json({ ok: true });
+  }
+
   throw new HttpError(404, 'Bulunamadi');
 }
 
@@ -1069,4 +1102,20 @@ function b64uDecode(str) {
   const pad = '='.repeat((4 - (str.length % 4)) % 4);
   const bin = atob(str.replace(/-/g, '+').replace(/_/g, '/') + pad);
   return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+}
+
+async function sendDigest(env) {
+  const pending = await env.DB.prepare('SELECT COUNT(*) AS n FROM notify_queue WHERE count > 0').first();
+  if (!pending || !pending.n) return;
+  const rows = await env.DB.prepare('SELECT endpoint FROM push_subscriptions').all();
+  for (const row of rows.results || []) {
+    try {
+      const res = await sendEmpty(row.endpoint, env);
+      if (res.status === 404 || res.status === 410) {
+        await env.DB.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').bind(row.endpoint).run();
+      }
+    } catch (err) {
+      console.error('ozet push gonderilemedi', err);
+    }
+  }
 }
