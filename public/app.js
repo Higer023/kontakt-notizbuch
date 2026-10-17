@@ -1431,31 +1431,68 @@ for (const [name, lat, lng] of REGION_CITIES) CITY_COORDS[cityKey(name)] = [lat,
   dl.innerHTML += REGION_CITIES.map(([name]) => `<option value="${esc(name)}"></option>`).join('');
 })();
 
-// ---------- Kisi formunda canli konum onizlemesi (tarayicida, dis servis yok) ----------
+// ---------- Kisi formunda canli konum onizlemesi ----------
+// 1) Once yerel tablo (dis servise gitmez). 2) Yoksa, yazma bitince Photon'a SADECE yer metni gider.
 (function livePreview() {
   const input = document.querySelector('input[name="city"]');
   const box = document.getElementById('city-preview');
   const note = document.getElementById('city-preview-note');
   if (!input || !box || !note) return;
-  let map = null, marker = null;
+  let map = null, marker = null, timer = null, seq = 0;
+  const remoteCache = new Map();
+
+  function ensureMap() {
+    if (map) return;
+    map = L.map(box, { zoomControl: false, attributionControl: false }).setView([39.0, 35.0], 4);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 16 }).addTo(map);
+  }
+  function showPos(pos, raw, source) {
+    ensureMap();
+    if (marker) { marker.remove(); marker = null; }
+    marker = L.circleMarker(pos, { radius: 7 }).addTo(map);
+    map.setView(pos, 9);
+    note.textContent = 'Haritada: ' + raw + (source ? ' (' + source + ')' : '');
+    setTimeout(() => map.invalidateSize(), 0);
+  }
+  function clearMarker() { if (marker) { marker.remove(); marker = null; } }
+
+  async function geocodeRemote(q) {
+    const key = cityKey(q);
+    if (remoteCache.has(key)) return remoteCache.get(key);
+    // Sadece yer metni gonderilir. Kimlik bilgisi, cerez veya referans bilgisi gonderilmez.
+    const res = await fetch('https://photon.komoot.io/api/?limit=1&q=' + encodeURIComponent(q), {
+      credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store',
+    });
+    if (!res.ok) throw new Error('servis hatasi');
+    const data = await res.json();
+    const f = data.features && data.features[0];
+    const pos = f ? [f.geometry.coordinates[1], f.geometry.coordinates[0]] : null;
+    remoteCache.set(key, pos);
+    return pos;
+  }
+
   function update() {
     const raw = input.value.trim();
-    if (!raw) { note.textContent = ''; if (marker) { marker.remove(); marker = null; } return; }
+    clearTimeout(timer);
+    const my = ++seq;
+    if (!raw) { note.textContent = ''; clearMarker(); return; }
     if (typeof L === 'undefined') { note.textContent = 'Harita kutuphanesi yuklenemedi.'; return; }
-    if (!map) {
-      map = L.map(box, { zoomControl: false, attributionControl: false }).setView([39.0, 35.0], 4);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 16 }).addTo(map);
-    }
-    const pos = CITY_COORDS[cityKey(raw)];
-    if (marker) { marker.remove(); marker = null; }
-    if (pos) {
-      marker = L.circleMarker(pos, { radius: 7 }).addTo(map);
-      map.setView(pos, 9);
-      note.textContent = 'Haritada: ' + raw;
-    } else {
-      note.textContent = 'Bu yer haritada kayitli degil. Listeden bir il veya Alman sehri secin.';
-    }
-    setTimeout(() => map.invalidateSize(), 0);
+    const local = CITY_COORDS[cityKey(raw)];
+    if (local) { showPos(local, raw); return; }
+    clearMarker();
+    if (raw.length < 3) { note.textContent = 'Yazmaya devam edin.'; return; }
+    note.textContent = 'Konum araniyor...';
+    timer = setTimeout(async () => {
+      try {
+        const pos = await geocodeRemote(raw);
+        if (my !== seq) return;
+        if (pos) showPos(pos, raw, 'harita servisi');
+        else { note.textContent = 'Bu yer bulunamadi. Farkli yazmayi deneyin.'; ensureMap(); }
+      } catch {
+        if (my !== seq) return;
+        note.textContent = 'Konum aranamadi (internet baglantisi?).';
+      }
+    }, 900);
   }
   input.addEventListener('input', update);
   input.addEventListener('change', update);
