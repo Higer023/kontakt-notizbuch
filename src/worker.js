@@ -1400,8 +1400,47 @@ async function recoveryLogin(request, env, ip, url) {
   return json({ ok: true, blob: row.blob }, 200, { 'Set-Cookie': await passkeySessionCookie(request, env) });
 }
 
+// Kurtarma e-postasi: koyu tema, inline stiller (e-posta istemcileri uyumlu)
+function recoveryMailHtml(displayCode) {
+  const safe = String(displayCode).replace(/[^A-Za-z0-9-]/g, '');
+  return `<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Rehber kurtarma kodu</title>
+</head>
+<body style="margin:0;padding:0;background:#000000;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#000000;padding:32px 12px;">
+<tr><td align="center">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#050505;border:1px solid #1f1f22;border-radius:20px;">
+<tr><td style="padding:32px 28px 8px 28px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+<div style="display:inline-block;width:44px;height:44px;line-height:44px;text-align:center;border-radius:14px;background:linear-gradient(135deg,#b5ead7,#d7c9ff);color:#000000;font-weight:700;font-size:20px;">R</div>
+<h1 style="margin:18px 0 6px 0;font-size:22px;line-height:1.3;color:#f5f5f7;font-weight:700;letter-spacing:-0.02em;">Kurtarma kodunuz</h1>
+<p style="margin:0;color:#8a8a92;font-size:15px;line-height:1.6;">Parmak izinize ya da parolanıza erişemediğinizde Rehber'e girmek için bu kodu kullanın.</p>
+</td></tr>
+<tr><td style="padding:22px 28px;">
+<div style="background:#000000;border:1px solid #2a2a2e;border-radius:16px;padding:22px 16px;text-align:center;">
+<div style="font-family:'SF Mono',Menlo,Consolas,'Courier New',monospace;font-size:24px;line-height:1.4;letter-spacing:3px;color:#b5ead7;font-weight:700;">{{CODE}}</div>
+<div style="margin-top:8px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:12px;color:#5a5a62;">Kodu uzun basarak seçip kopyalayabilirsiniz</div>
+</div>
+</td></tr>
+<tr><td style="padding:0 28px 8px 28px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#8a8a92;font-size:14px;line-height:1.7;">
+<p style="margin:0 0 10px 0;">Bu kod her kullanıldığında otomatik olarak yenilenir ve yeni kod size tekrar gönderilir. Eski kod geçersizdir.</p>
+<p style="margin:0;">Bu isteği siz yapmadıysanız kodu kimseyle paylaşmayın ve kasa parolanızı hemen değiştirin.</p>
+</td></tr>
+<tr><td style="padding:18px 28px 28px 28px;border-top:1px solid #1f1f22;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:12px;color:#5a5a62;">Rehber &middot; kişisel kontakt defteri</td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>`.replace('{{CODE}}', safe);
+}
+
 async function sendRecoveryMail(env, displayCode) {
   if (!env.RESEND_API_KEY || !env.RECOVERY_EMAIL) throw new Error('mail yapilandirilmamis');
+  const safe = String(displayCode).replace(/[^A-Za-z0-9-]/g, '');
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
@@ -1409,7 +1448,8 @@ async function sendRecoveryMail(env, displayCode) {
       from: 'Rehber <onboarding@resend.dev>',
       to: [env.RECOVERY_EMAIL],
       subject: 'Rehber kurtarma kodu',
-      text: `Yeni kurtarma kodunuz:\n\n${displayCode}\n\nBu kod her kullanildiginda otomatik yenilenir. Eski kod gecersizdir. Kodu kimseyle paylasmayin.`,
+      html: recoveryMailHtml(safe),
+      text: `Yeni kurtarma kodunuz:\n\n${safe}\n\nBu kod her kullanildiginda otomatik yenilenir. Eski kod gecersizdir. Kodu kimseyle paylasmayin.`,
     }),
   });
   if (!res.ok) throw new Error('mail hatasi ' + res.status);
