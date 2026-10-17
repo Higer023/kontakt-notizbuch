@@ -608,6 +608,7 @@ function cardHtml(c, i) {
 
 $('#contacts-grid').addEventListener('click', (e) => {
   const card = e.target.closest('.contact-card');
+  if (card && selMode) { toggleSel(Number(card.dataset.id), card); return; }
   if (card) openView(Number(card.dataset.id));
 });
 
@@ -1756,7 +1757,7 @@ function duplicatesHtml() {
   const head = '<h3>Olasi yinelenen kayitlar</h3>';
   if (!out.length) return head + '<div class="empty">Yinelenen kayit bulunamadi.</div>';
   return head + out.map((t) => `<div>${esc(t)}</div>`).join('')
-    + '<p class="muted">Ayni telefon, e-posta ya da ad-soyad eslesmesine gore listelenir. Birlestirme yapilmaz; kayitlari kontrol edip gerekirse kendiniz duzenleyin.</p>';
+    + '<p class="muted">Ayni telefon, e-posta ya da ad-soyad eslesmesine gore listelenir. Birlestirmek icin secim modunu acip iki kisi secin ve birlestirme dugmesine basin.</p>';
 }
 
 // ---------- Gelismis filtre: sehir ve etiket ----------
@@ -1848,4 +1849,108 @@ $('#install-app').addEventListener('click', async () => {
 window.addEventListener('appinstalled', () => {
   deferredInstallPrompt = null;
   $('#install-app').classList.add('hidden');
+});
+
+// ---------- Toplu secim (8): gruba ata, etiket ekle, cop kutusu, birlestir (9) ----------
+let selMode = false;
+const selected = new Set();
+const uniqBy = (arr, fn) => { const seen = new Set(); return arr.filter((x) => { const k = fn(x); if (seen.has(k)) return false; seen.add(k); return true; }); };
+function updateSelBar() {
+  $('#sel-count').textContent = selected.size + ' secili';
+  $('#sel-merge').classList.toggle('hidden', selected.size !== 2);
+  $('#sel-bar').classList.toggle('hidden', !selMode);
+  $('#sel-toggle').textContent = selMode ? 'Secimi kapat' : 'Sec';
+}
+function setSelMode(on) {
+  selMode = on;
+  if (!on) selected.clear();
+  updateSelBar();
+  renderGrid();
+}
+function toggleSel(id, el) {
+  if (selected.has(id)) selected.delete(id); else selected.add(id);
+  el.style.outline = selected.has(id) ? '2px solid #ece6d8' : '';
+  el.style.outlineOffset = '2px';
+  updateSelBar();
+}
+async function bulkUpdate(mutate) {
+  try {
+    for (const id of selected) {
+      const rec = records.get(id);
+      if (!rec) continue;
+      const d = { ...rec.data };
+      mutate(d);
+      await persist(id, d);
+    }
+    setSelMode(false);
+    await loadContacts();
+  } catch (err) { alertError(err); }
+}
+$('#sel-toggle').addEventListener('click', () => setSelMode(!selMode));
+$('#sel-cancel').addEventListener('click', () => setSelMode(false));
+$('#sel-group').addEventListener('click', async () => {
+  if (!selected.size) return alert('Once kisi secin.');
+  const g = prompt('Grup / sinif (bos birakirsaniz grup silinir):');
+  if (g === null) return;
+  await bulkUpdate((d) => { d.group_name = g.trim().slice(0, 60); });
+});
+$('#sel-tag').addEventListener('click', async () => {
+  if (!selected.size) return alert('Once kisi secin.');
+  const t = prompt('Eklenecek etiket (birden fazla icin virgul):');
+  if (!t || !t.trim()) return;
+  const add = t.split(',').map((x) => x.trim()).filter(Boolean);
+  await bulkUpdate((d) => {
+    const cur = (d.tags || '').split(',').map((x) => x.trim()).filter(Boolean);
+    d.tags = [...new Set([...cur, ...add])].join(', ').slice(0, 300);
+  });
+});
+$('#sel-trash').addEventListener('click', async () => {
+  if (!selected.size) return alert('Once kisi secin.');
+  if (!confirm(selected.size + ' kisi cop kutusuna tasinsin mi? 30 gun icinde geri alabilirsiniz.')) return;
+  try {
+    for (const id of selected) await trashContact(id);
+    setSelMode(false);
+    await loadContacts();
+  } catch (err) { alertError(err); }
+});
+
+// Birlestirme (9): S kaydi P'ye tasinir; iliskiler P'ye yonlenir; S cop kutusuna gider.
+function mergeData(P, S, pid, sid) {
+  const out = { ...P };
+  const scalars = ['nickname', 'birth_year', 'birth_month', 'birth_day', 'birthplace', 'city', 'school',
+    'group_name', 'occupation', 'how_we_met', 'phone', 'email', 'website'];
+  for (const k of scalars) if ((out[k] === null || out[k] === '' || out[k] === undefined) && S[k]) out[k] = S[k];
+  if (S.notes && S.notes !== out.notes) out.notes = [out.notes, S.notes].filter(Boolean).join('\n\n').slice(0, 5000);
+  const tags = [...(P.tags || '').split(','), ...(S.tags || '').split(',')].map((x) => x.trim()).filter(Boolean);
+  out.tags = [...new Set(tags)].join(', ').slice(0, 300);
+  out.socials = uniqBy([...(P.socials || []), ...(S.socials || [])], (x) => x.platform + '|' + x.username);
+  out.extra = uniqBy([...(P.extra || []), ...(S.extra || [])], (x) => x.label + '|' + x.value);
+  out.relations = uniqBy(
+    [...(P.relations || []), ...(S.relations || [])].filter((r) => Number(r.to) !== pid && Number(r.to) !== sid),
+    (r) => r.to + '|' + r.label);
+  return out;
+}
+$('#sel-merge').addEventListener('click', async () => {
+  if (selected.size !== 2) return;
+  const [pid, sid] = [...selected];
+  const P = records.get(pid), S = records.get(sid);
+  if (!P || !S) return;
+  const pName = fullName(P.data) || P.data.first_name;
+  const sName = fullName(S.data) || S.data.first_name;
+  if (!confirm(sName + ' kaydi ' + pName + ' kaydina birlestirilsin mi? ' + sName + ' cop kutusuna tasinacak.')) return;
+  try {
+    await persist(pid, mergeData(P.data, S.data, pid, sid));
+    for (const rec of [...records.values()]) {
+      if (rec.id === pid || rec.id === sid) continue;
+      const rels = rec.data.relations || [];
+      if (!rels.some((r) => Number(r.to) === sid)) continue;
+      const fixed = uniqBy(
+        rels.map((r) => (Number(r.to) === sid ? { ...r, to: pid } : r)).filter((r) => Number(r.to) !== rec.id),
+        (r) => r.to + '|' + r.label);
+      await persist(rec.id, { ...rec.data, relations: fixed });
+    }
+    await trashContact(sid);
+    setSelMode(false);
+    await loadContacts();
+  } catch (err) { alertError(err); }
 });
