@@ -104,6 +104,8 @@ async function handleApi(request, env, url) {
     requireFresh();
     return listLogs(env, url);
   }
+  if (pathname === '/api/sessions' && method === 'GET') { requireFresh(); return listSessions(env, session); }
+  if (pathname === '/api/sessions' && method === 'DELETE') { requireFresh(); return revokeSessions(request, env, session); }
   if (pathname === '/api/security' && method === 'GET') {
     requireFresh();
     return securityOverview(env);
@@ -443,10 +445,13 @@ async function login(request, env, ip) {
   if (!ok) throw new HttpError(401, 'Kullanici adi veya sifre hatali');
 
   await env.DB.prepare("DELETE FROM sessions WHERE expires_at < datetime('now')").run();
+  await env.DB.prepare('DELETE FROM session_meta WHERE token_hash NOT IN (SELECT token_hash FROM sessions)').run();
   const token = randomToken();
   await env.DB.prepare(
     "INSERT INTO sessions (token_hash, expires_at, reauth_until) VALUES (?, datetime('now', ?), datetime('now', ?))"
   ).bind(await sha256(token), `+${SESSION_HOURS} hours`, `+${REAUTH_MINUTES} minutes`).run();
+  await env.DB.prepare('INSERT OR REPLACE INTO session_meta (token_hash, ua) VALUES (?, ?)')
+    .bind(await sha256(token), String(request.headers.get('User-Agent') || '').slice(0, 200)).run();
 
   return json({ ok: true }, 200, { 'Set-Cookie': sessionCookie(token, SESSION_HOURS * 3600) });
 }
@@ -488,6 +493,38 @@ async function logout(request, env) {
     await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(await sha256(token)).run();
   }
   return json({ ok: true }, 200, { 'Set-Cookie': sessionCookie('', 0) });
+}
+
+async function listSessions(env, session) {
+  const rows = await env.DB.prepare(
+    "SELECT s.token_hash, s.created_at, s.expires_at, COALESCE(m.ua, '') AS ua FROM sessions s LEFT JOIN session_meta m ON m.token_hash = s.token_hash WHERE s.expires_at > datetime('now') ORDER BY s.created_at DESC"
+  ).all();
+  return json({
+    ok: true,
+    sessions: (rows.results || []).map((r) => ({
+      id: String(r.token_hash).slice(0, 16),
+      created_at: r.created_at,
+      expires_at: r.expires_at,
+      ua: String(r.ua || '').slice(0, 200),
+      current: r.token_hash === session.token_hash,
+    })),
+  });
+}
+
+async function revokeSessions(request, env, session) {
+  const body = await readJson(request);
+  if (body.all === true) {
+    await env.DB.prepare('DELETE FROM sessions WHERE token_hash != ?').bind(session.token_hash).run();
+    return json({ ok: true });
+  }
+  const id = typeof body.id === 'string' ? body.id : '';
+  if (!/^[0-9a-zA-Z]{16}$/.test(id)) throw new HttpError(400, 'Gecersiz oturum');
+  const rows = await env.DB.prepare('SELECT token_hash FROM sessions WHERE token_hash LIKE ?').bind(id + '%').all();
+  const list = rows.results || [];
+  if (list.length !== 1) throw new HttpError(404, 'Oturum bulunamadi');
+  if (list[0].token_hash === session.token_hash) throw new HttpError(400, 'Bu oturumu cikis yaparak kapatin');
+  await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(list[0].token_hash).run();
+  return json({ ok: true });
 }
 
 async function requireSession(request, env) {
