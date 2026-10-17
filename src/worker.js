@@ -436,6 +436,8 @@ async function verifyAdminPassword(env, username, password) {
 }
 
 async function login(request, env, ip) {
+  // Parola tek basina yeterli degil: parmak izi veya kurtarma kodu ile birlikte kullanilir.
+  throw new HttpError(403, 'Sadece parola ile giris kapali. Parmak izi veya kurtarma kodu kullanin.');
   if ((await recentFailCount(env, ip)) >= MAX_FAILS) {
     throw new HttpError(429, 'Cok fazla hatali deneme. Lutfen daha sonra tekrar deneyin.');
   }
@@ -1350,9 +1352,10 @@ async function passkeyLogin(request, env, ip, url) {
     await recordFootprint(env, request, ip, 'login_bot', false, body.fp);
     throw new HttpError(403, 'Dogrulama basarisiz. Lutfen tekrar deneyin.');
   }
-  const ok = await verifyAssertion(env, body.assertion, url);
+  const pwOk = await requirePassword(env, body);
+  const ok = pwOk && (await verifyAssertion(env, body.assertion, url));
   await recordFootprint(env, request, ip, 'login', ok, body.fp);
-  if (!ok) throw new HttpError(401, 'Parmak izi dogrulanamadi');
+  if (!ok) throw new HttpError(401, pwOk ? 'Parmak izi dogrulanamadi' : 'Kullanici adi veya sifre hatali');
   return json({ ok: true }, 200, { 'Set-Cookie': await passkeySessionCookie(request, env) });
 }
 
@@ -1391,6 +1394,11 @@ async function recoveryLogin(request, env, ip, url) {
   if (!(await verifyTurnstile(env, body.turnstile, ip))) {
     await recordFootprint(env, request, ip, 'login_bot', false, body.fp);
     throw new HttpError(403, 'Dogrulama basarisiz. Lutfen tekrar deneyin.');
+  }
+  const pwOk = await requirePassword(env, body);
+  if (!pwOk) {
+    await recordFootprint(env, request, ip, 'login', false, body.fp);
+    throw new HttpError(401, 'Kullanici adi veya sifre hatali');
   }
   const code = normalizeRecoveryCode(body.code);
   const row = await env.DB.prepare('SELECT code_hash, blob FROM recovery WHERE id = 1').first();
@@ -1482,6 +1490,10 @@ async function recoverySend(request, env, ip) {
     await recordFootprint(env, request, ip, 'login_bot', false, body.fp);
     throw new HttpError(403, 'Dogrulama basarisiz. Lutfen tekrar deneyin.');
   }
+  if (!(await requirePassword(env, body))) {
+    await recordFootprint(env, request, ip, 'login', false, body.fp);
+    throw new HttpError(401, 'Kullanici adi veya sifre hatali');
+  }
   const recent = await env.DB.prepare(
     "SELECT 1 AS r FROM recovery WHERE id = 1 AND updated_at > datetime('now', '-2 minutes')"
   ).first();
@@ -1508,4 +1520,10 @@ async function storeRecovery(env, displayCodeIn, blobIn) {
     "ON CONFLICT(id) DO UPDATE SET code_hash = excluded.code_hash, blob = excluded.blob, updated_at = excluded.updated_at"
   ).bind(hash, blob).run();
   return json({ ok: true });
+}
+
+async function requirePassword(env, body) {
+  const username = typeof body.username === 'string' ? body.username.trim().slice(0, 100) : '';
+  const password = typeof body.password === 'string' ? body.password : '';
+  return username.length > 0 && password.length > 0 && (await verifyAdminPassword(env, username, password));
 }
