@@ -269,6 +269,7 @@ $('#main-menu').addEventListener('click', (e) => {
   if (act === 'contacts') switchTab('contacts');
   if (act === 'security') switchTab('security');
   if (act === 'graph') openGraph();
+  if (act === 'map') openMap();
   if (act === 'summary') openSummary();
   if (act === 'settings') $('#settings-dialog').showModal();
 });
@@ -1002,6 +1003,70 @@ $('#security-tab').addEventListener('click', async (e) => {
 function alertError(err) {
   alert(err?.message || 'Bir hata olustu');
 }
+
+
+// ---------- Harita (Leaflet + OpenStreetMap): sehir alanina gore konum ----------
+// Konumlar sunucuya gitmez; sadece tarayicida, sehir adina gore eslestirilir.
+const CITY_COORDS = {
+  istanbul: [41.0082, 28.9784], ankara: [39.9334, 32.8597], izmir: [38.4237, 27.1428],
+  bursa: [40.195, 29.06], antalya: [36.8969, 30.7133], adana: [37.0, 35.3213],
+  konya: [37.8746, 32.4932], gaziantep: [37.0662, 37.3833], kayseri: [38.7312, 35.4787],
+  mersin: [36.8121, 34.6415], eskisehir: [39.7767, 30.5206], samsun: [41.2867, 36.33],
+  trabzon: [41.0027, 39.7168], diyarbakir: [37.9144, 40.2306], erzurum: [39.9043, 41.2679],
+  van: [38.4891, 43.4089], kocaeli: [40.8533, 29.8815], izmit: [40.7654, 29.9408],
+  denizli: [37.7765, 29.0864], malatya: [38.3552, 38.3095], sakarya: [40.7569, 30.3783],
+  tekirdag: [40.9781, 27.5117], mugla: [37.2153, 28.3636], aydin: [37.856, 27.8416],
+  hatay: [36.2023, 36.16], manisa: [38.6191, 27.4289], balikesir: [39.6484, 27.8826],
+  kastamonu: [41.3887, 33.7827], rize: [41.0201, 40.5234], edirne: [41.6818, 26.5623],
+  london: [51.5074, -0.1278], paris: [48.8566, 2.3522], berlin: [52.52, 13.405],
+  amsterdam: [52.3676, 4.9041], vienna: [48.2082, 16.3738], viyana: [48.2082, 16.3738],
+  munih: [48.1351, 11.582], frankfurt: [50.1109, 8.6821], roma: [41.9028, 12.4964],
+  'new york': [40.7128, -74.006],
+};
+
+function cityKey(value) {
+  return String(value || '').toLocaleLowerCase('tr').replace(/ı/g, 'i')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+let mapInstance = null;
+
+function openMap() {
+  $('#map-dialog').showModal();
+  const list = $('#map-list');
+  if (typeof L === 'undefined') {
+    list.innerHTML = '<div class="empty">Harita kutuphanesi yuklenemedi. Internet baglantinizi kontrol edin.</div>';
+    return;
+  }
+  const located = [];
+  const missing = [];
+  for (const c of contacts) {
+    const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Isimsiz';
+    if (!c.city) continue;
+    const pos = CITY_COORDS[cityKey(c.city)];
+    if (pos) located.push({ name, city: c.city, pos });
+    else missing.push({ name, city: c.city });
+  }
+  list.innerHTML = located.length
+    ? located.map((p) => `<div>${esc(p.name)} <span class="muted">· ${esc(p.city)}</span></div>`).join('')
+      + (missing.length ? `<p class="muted">Konumu bulunamayan sehirler: ${missing.map((m) => esc(m.city)).join(', ')}</p>` : '')
+    : '<div class="empty">Konumu bulunabilen kisi yok.</div>';
+
+  setTimeout(() => {
+    if (mapInstance) { mapInstance.remove(); mapInstance = null; }
+    mapInstance = L.map('map-box').setView([39.0, 35.0], 5);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 18,
+      attribution: '&copy; OpenStreetMap',
+    }).addTo(mapInstance);
+    located.forEach((p) => {
+      L.circleMarker(p.pos, { radius: 6 }).bindPopup(`${esc(p.name)} · ${esc(p.city)}`).addTo(mapInstance);
+    });
+    if (located.length) mapInstance.fitBounds(located.map((p) => p.pos), { padding: [30, 30], maxZoom: 10 });
+    mapInstance.invalidateSize();
+  }, 50);
+}
+$('#map-close').addEventListener('click', () => $('#map-dialog').close());
 
 // ---------- Ozet, tema, iliski haritasi ----------
 
