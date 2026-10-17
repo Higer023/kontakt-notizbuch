@@ -20,6 +20,7 @@
       <p class="muted">Giris icin kullanici adi, sifre ve konum izni gerekir.</p>
       <input type="text" id="username" placeholder="Kullanici adi" autocomplete="username" required>
       <input type="password" id="password" placeholder="Sifre" autocomplete="current-password" required>
+      <p id="password-hint" class="muted" style="font-size:12px;margin:0">Ipucu: _</p>
       <div class="cf-turnstile" data-sitekey="0x4AAAAAAFWHrfVQBQ0eBkIP" data-theme="dark"></div>
       <button type="submit" class="btn-primary">Konum izniyle giris yap</button>
       <p id="login-error" class="error" role="alert"></p>
@@ -74,6 +75,7 @@
       <div class="graph-menu-list">
         <button type="button" class="glass" data-m="contacts">Kisiler</button>
         <button type="button" class="glass" data-m="graph">Iliski haritasi</button>
+<button type="button" class="glass" data-m="map">Harita</button>
         <button type="button" class="glass" data-m="summary">Ozet</button>
         <button type="button" class="glass" data-m="security">Guvenlik</button>
         <button type="button" class="glass" data-m="settings">Ayarlar</button>
@@ -81,7 +83,18 @@
     </div>
   </dialog>
 
-  <dialog id="settings-dialog" class="sheet">
+  <dialog id="map-dialog" class="sheet">
+<div class="sheet-body form">
+<div class="sheet-grip"></div>
+<h2>Harita</h2>
+<p class="muted">Sehir alanina gore kisi konumlari. Harita karolari OpenStreetMap sunucularindan yuklenir.</p>
+<div id="map-box" style="height:360px;width:100%;border-radius:12px;overflow:hidden"></div>
+<div id="map-list" style="margin-top:12px"></div>
+<div style="margin-top:12px"><button type="button" id="map-close" class="glass">Kapat</button></div>
+</div>
+</dialog>
+
+<dialog id="settings-dialog" class="sheet">
     <div class="sheet-body form">
       <div class="sheet-grip"></div>
       <div class="section-title"><h2>Ayarlar</h2><button type="button" id="settings-close" class="pill glass small">Kapat</button></div>
@@ -250,6 +263,8 @@
     </form>
   </dialog>
 
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin=""></script>
   <script src="/crypto.js"></script>
   <script src="/app.js" defer></script>
 </body>
