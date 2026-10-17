@@ -1365,3 +1365,40 @@ api('/api/me').then(() => {
   if (Vault.isUnlocked()) showApp();
   else showLogin('Sifreli verileriniz icin tekrar giris yapin.');
 }).catch(() => showLogin());
+
+// ---------- Yedekleme: JSON ve CSV disa aktarma (Ayarlar) ----------
+function downloadText(text, name, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function stampDate() { return new Date().toISOString().slice(0, 10); }
+function confirmPlainExport() {
+  return confirm('Bu dosya SIFRESIZ olacak ve tum kisi bilgilerini icerir. Guvenli bir yerde saklayin. Devam edilsin mi?');
+}
+function exportJson() {
+  if (!contacts.length) { alert('Disa aktarilacak kisi yok.'); return; }
+  if (!confirmPlainExport()) return;
+  const data = { exported_at: new Date().toISOString(), version: 1, contacts };
+  downloadText(JSON.stringify(data, null, 2), `rehber-${stampDate()}.json`, 'application/json');
+}
+function csvCell(value) {
+  const s = value == null ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value);
+  return /[",\r\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+function exportCsv() {
+  if (!contacts.length) { alert('Disa aktarilacak kisi yok.'); return; }
+  if (!confirmPlainExport()) return;
+  const keys = [...new Set(contacts.flatMap((c) => Object.keys(c)))];
+  const lines = [keys.join(',')].concat(contacts.map((c) => keys.map((k) => csvCell(c[k])).join(',')));
+  downloadText('\ufeff' + lines.join('\r\n'), `rehber-${stampDate()}.csv`, 'text/csv;charset=utf-8');
+}
+$('#export-json').addEventListener('click', exportJson);
+$('#export-csv').addEventListener('click', exportCsv);
+
+// ---------- PWA: sadece uygulama kabugu onbellege alinir (kisi verisi DEGIL) ----------
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
