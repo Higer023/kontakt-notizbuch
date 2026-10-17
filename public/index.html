@@ -40,7 +40,9 @@
       <div id="contacts-tab">
         <div class="toolbar">
           <input type="search" id="search" class="glass search" placeholder="Ara: isim, okul, grup, etiket">
-          <select id="group-filter" class="glass select"><option value="">Tum gruplar</option></select>
+          <select id="city-filter" class="glass"></select>
+<select id="tag-filter" class="glass"></select>
+<select id="group-filter" class="glass select"><option value="">Tum gruplar</option></select>
         </div>
         <div id="contacts-grid" class="grid"></div>
       </div>
@@ -95,12 +97,23 @@
 </div>
 </dialog>
 
+<dialog id="trash-dialog" class="sheet">
+<div class="sheet-body form">
+<div class="sheet-grip"></div>
+<h2>Cop kutusu</h2>
+<p class="muted">Silinen kisiler 30 gun saklanir, sonra kalici olarak silinir.</p>
+<div id="trash-list"></div>
+<div style="margin-top:12px"><button type="button" id="trash-close" class="glass">Kapat</button></div>
+</div>
+</dialog>
+
 <dialog id="settings-dialog" class="sheet">
     <div class="sheet-body form">
       <div class="sheet-grip"></div>
       <div class="section-title"><h2>Ayarlar</h2><button type="button" id="settings-close" class="pill glass small">Kapat</button></div>
       <div class="graph-menu-list">
         <button type="button" id="theme-btn" class="glass">Tema degistir (acik / koyu)</button>
+        <button type="button" id="trash-open" class="glass">Cop kutusu (30 gun)</button>
         <button type="button" id="import-contacts" class="glass">Kisi ice aktar (.vcf / Google .csv)</button>
         <button type="button" id="export-ics" class="glass">Dogum gunu takvimi (.ics)</button>
         <button type="button" id="export-json" class="glass">Yedekle (JSON, sifresiz)</button>
