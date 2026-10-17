@@ -547,12 +547,19 @@ async function removeRelation(entry) {
 
 async function loadContacts() {
   if (!Vault.isUnlocked()) throw new Error('Kasa kilitli');
+  await purgeOldTrash();
   const q = $('#search').value.trim().toLowerCase();
   const group = $('#group-filter').value;
-  const all = buildViews();
+  const city = $('#city-filter').value;
+  const tag = $('#tag-filter').value;
+  const alive = new Set([...records.values()].filter((r) => !r.data.deleted_at).map((r) => r.id));
+  const all = buildViews().filter((c) => alive.has(c.id));
   renderGroups(all);
+  renderFilters(all);
   contacts = all
     .filter((c) => !group || c.group_name === group)
+    .filter((c) => !city || c.city === city)
+    .filter((c) => !tag || (c.tags || '').split(',').map((t) => t.trim()).includes(tag))
     .filter((c) => !q || [c.first_name, c.last_name, c.nickname, c.city, c.school, c.group_name, c.occupation, c.tags, c.email]
       .filter(Boolean).join(' ').toLowerCase().includes(q))
     .slice(0, 500);
@@ -726,9 +733,9 @@ $('#view-body').addEventListener('click', async (e) => {
     openEdit(viewById(viewingId));
   }
   if (act === 'delete') {
-    if (!confirm('Bu kisi ve tum iliskileri silinsin mi?')) return;
+    if (!confirm('Kisi cop kutusuna tasinsin mi? 30 gun icinde geri alabilirsiniz.')) return;
     try {
-      await deleteContactById(viewingId);
+      await trashContact(viewingId);
       $('#view-dialog').close();
       await loadContacts();
     } catch (err) { if (err.message !== 'Islem iptal edildi') alertError(err); }
@@ -1751,3 +1758,75 @@ function duplicatesHtml() {
   return head + out.map((t) => `<div>${esc(t)}</div>`).join('')
     + '<p class="muted">Ayni telefon, e-posta ya da ad-soyad eslesmesine gore listelenir. Birlestirme yapilmaz; kayitlari kontrol edip gerekirse kendiniz duzenleyin.</p>';
 }
+
+// ---------- Gelismis filtre: sehir ve etiket ----------
+function renderFilters(all) {
+  const fill = (sel, values, label) => {
+    const el = $(sel);
+    const cur = el.value;
+    const vals = [...new Set(values.map((v) => String(v || '').trim()).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, 'tr'));
+    if (cur && !vals.includes(cur)) vals.push(cur);
+    el.innerHTML = `<option value="">${label}</option>` + vals.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+    el.value = cur;
+  };
+  fill('#city-filter', all.map((c) => c.city), 'Tum sehirler');
+  fill('#tag-filter', all.flatMap((c) => (c.tags || '').split(',')), 'Tum etiketler');
+}
+$('#city-filter').addEventListener('change', () => loadContacts().catch(alertError));
+$('#tag-filter').addEventListener('change', () => loadContacts().catch(alertError));
+
+// ---------- Cop kutusu: silme yumusak; 30 gun sonra kalici ----------
+const TRASH_DAYS = 30;
+async function trashContact(id) {
+  const rec = records.get(id);
+  if (!rec) return;
+  await persist(id, { ...rec.data, deleted_at: new Date().toISOString() });
+}
+async function purgeOldTrash() {
+  const cutoff = Date.now() - TRASH_DAYS * 86400000;
+  const old = [...records.values()].filter((r) => r.data.deleted_at && Date.parse(r.data.deleted_at) < cutoff);
+  for (const r of old) {
+    try { await deleteContactById(r.id); } catch { /* sonraki acilista tekrar denenir */ }
+  }
+}
+function renderTrash() {
+  const items = [...records.values()]
+    .filter((r) => r.data.deleted_at)
+    .sort((a, b) => Date.parse(b.data.deleted_at) - Date.parse(a.data.deleted_at));
+  const list = $('#trash-list');
+  if (!items.length) { list.innerHTML = '<div class="empty">Cop kutusu bos.</div>'; return; }
+  list.innerHTML = items.map((r) => {
+    const left = Math.max(0, TRASH_DAYS - Math.floor((Date.now() - Date.parse(r.data.deleted_at)) / 86400000));
+    const name = fullName(r.data) || r.data.first_name || 'Isimsiz';
+    return `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin:8px 0">
+      <span>${esc(name)} <span class="muted">(${left} gun kaldi)</span></span>
+      <span><button class="glass" data-restore="${r.id}">Geri yukle</button>
+      <button class="btn-danger" data-purge="${r.id}">Kalici sil</button></span></div>`;
+  }).join('');
+}
+$('#trash-list').addEventListener('click', async (e) => {
+  const restore = e.target.closest('[data-restore]')?.dataset.restore;
+  const purge = e.target.closest('[data-purge]')?.dataset.purge;
+  try {
+    if (restore) {
+      const id = Number(restore);
+      const rec = records.get(id);
+      const d = { ...rec.data };
+      delete d.deleted_at;
+      await persist(id, d);
+    }
+    if (purge) {
+      if (!confirm('Bu kisi kalici olarak silinsin mi? Geri alinamaz.')) return;
+      await deleteContactById(Number(purge));
+    }
+    renderTrash();
+    await loadContacts();
+  } catch (err) { alertError(err); }
+});
+$('#trash-open').addEventListener('click', () => {
+  $('#settings-dialog').close();
+  renderTrash();
+  $('#trash-dialog').showModal();
+});
+$('#trash-close').addEventListener('click', () => $('#trash-dialog').close());
