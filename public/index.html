@@ -19,15 +19,14 @@
     <form id="login-form" class="glass login-card">
       <div class="login-mark">R</div>
       <h1>Rehber</h1>
-      <p class="muted">Giris icin kullanici adi, sifre ve konum izni gerekir.</p>
+      <p class="muted">Giris icin kasa parolasi ve ikinci dogrulama gerekir: parmak izi ya da kurtarma kodu.</p>
       <input type="text" id="username" placeholder="Kullanici adi" autocomplete="username" required>
       <input type="password" id="password" placeholder="Sifre" autocomplete="current-password" required>
       <p id="password-hint" class="muted" style="font-size:12px;margin:0">Ipucu: _</p>
       <div class="cf-turnstile" data-sitekey="0x4AAAAAAFWHrfVQBQ0eBkIP" data-theme="dark"></div>
         <button type="button" id="passkey-login" class="glass">Parmak izi ile giris</button>
         <button type="button" id="recovery-login" class="glass">Kurtarma kodu ile giris</button>
-        <p class="muted" style="font-size:12px;margin:0">Parmak izi icin once kasa parolasini yazin.</p>
-      <button type="submit" class="btn-primary">Konum izniyle giris yap</button>
+        <p class="muted" style="font-size:12px;margin:0">Parolayi yazdiktan sonra parmak izi veya kurtarma kodu ile dogrulayin.</p>
       <p id="login-error" class="error" role="alert"></p>
     </form>
   </section>
