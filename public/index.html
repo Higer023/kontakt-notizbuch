@@ -25,6 +25,7 @@
       <p id="password-hint" class="muted" style="font-size:12px;margin:0">Ipucu: _</p>
       <div class="cf-turnstile" data-sitekey="0x4AAAAAAFWHrfVQBQ0eBkIP" data-theme="dark"></div>
         <button type="button" id="passkey-login" class="glass">Parmak izi ile giris</button>
+        <button type="button" id="recovery-login" class="glass">Kurtarma kodu ile giris</button>
         <p class="muted" style="font-size:12px;margin:0">Parmak izi icin once kasa parolasini yazin.</p>
       <button type="submit" class="btn-primary">Konum izniyle giris yap</button>
       <p id="login-error" class="error" role="alert"></p>
@@ -140,6 +141,7 @@
           <div class="graph-menu-list">
             <button type="button" id="passkey-add" class="glass">Parmak izi ekle (bu cihaz)</button>
             <button type="button" id="passkey-manage" class="glass">Kayitli parmak izlerini yonet</button>
+            <button type="button" id="recovery-request" class="glass">Kurtarma kodunu e-postala</button>
             <button type="button" id="sessions-open" class="glass">Acik oturumlar</button>
             <button type="button" id="logout-btn" class="glass btn-danger">Cikis yap</button>
           </div>
@@ -343,6 +345,7 @@
   <script src="/crypto.js"></script>
   <script src="/push.js" defer></script>
 <script src="/passkey.js" defer></script>
+<script src="/recovery.js" defer></script>
 <script src="/app.js" defer></script>
 </body>
 </html>
