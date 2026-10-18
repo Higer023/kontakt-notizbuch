@@ -1704,27 +1704,65 @@ function toImportRecord(p) {
     socials: [], extra: [], notes: cut(p.notes, 5000), tags: '', relations: [],
   };
 }
-async function importContactsFile(file) {
-  const text = await file.text();
-  const parsed = /BEGIN:VCARD/i.test(text) ? parseVcf(text) : parseGoogleCsv(text);
-  if (!parsed.length) { alert('Dosyada kisi bulunamadi.'); return; }
-  if (!confirm(`${parsed.length} kayit okundu. Eklensin mi? Telefon/e-posta gecersizse o alan bos eklenir, isim yoksa kayit atlanir.`)) return;
-  let ok = 0, skipped = 0;
-  for (const p of parsed) {
-    const rec = toImportRecord(p);
-    if (!rec.first_name) { skipped++; continue; }
+// Ayni kisinin tekrar eklenmesini onlemek icin anahtarlar (telefon son 9 hane, e-posta, ad+soyad)
+function contactKeys(c) {
+  const keys = [];
+  const digits = String(c.phone || '').replace(/\D/g, '');
+  if (digits.length >= 7) keys.push('p:' + digits.slice(-9));
+  if (c.email) keys.push('e:' + String(c.email).trim().toLowerCase());
+  const f = String(c.first_name || '').trim(), l = String(c.last_name || '').trim();
+  if (f && l) keys.push('n:' + f.toLocaleLowerCase('tr') + '|' + l.toLocaleLowerCase('tr'));
+  return keys;
+}
+
+// Birden fazla dosya: once ozet, sonra onay. Yinelenenler (mevcut ve dosya ici) atlanir.
+async function importContactsFiles(files) {
+  const parsed = [];
+  for (const file of files) {
+    const text = await file.text();
+    const list = /BEGIN:VCARD/i.test(text) ? parseVcf(text) : parseGoogleCsv(text);
+    parsed.push(...list.map(toImportRecord));
+  }
+  if (!parsed.length) { alert('Dosyalarda kisi bulunamadi.'); return; }
+
+  const seen = new Set();
+  contacts.forEach((c) => contactKeys(c).forEach((k) => seen.add(k)));
+  const toAdd = [];
+  let noName = 0, dup = 0;
+  for (const rec of parsed) {
+    if (!rec.first_name) { noName++; continue; }
+    const keys = contactKeys(rec);
+    if (keys.some((k) => seen.has(k))) { dup++; continue; }
+    keys.forEach((k) => seen.add(k));
+    toAdd.push(rec);
+  }
+  if (!toAdd.length) {
+    alert(`Eklenecek yeni kisi yok. ${dup} yinelenen, ${noName} isimsiz kayit atlandi.`);
+    return;
+  }
+  const msg = `${parsed.length} kayit okundu (${files.length} dosya).\n` +
+    `${toAdd.length} yeni kisi eklenecek.\n` +
+    `${dup} yinelenen ve ${noName} isimsiz kayit atlanacak.\n\nEklensin mi?`;
+  if (!confirm(msg)) return;
+
+  let ok = 0, invalid = 0;
+  for (const rec of toAdd) {
     try { validate(rec); await persist(null, rec); ok++; }
-    catch { skipped++; }
+    catch { invalid++; }
   }
   await loadContacts();
-  alert(`${ok} kisi eklendi, ${skipped} kayit atlandi.`);
+  alert(`${ok} kisi eklendi. ${invalid} kayit gecersiz oldugu icin atlandi.`);
 }
+
 $('#import-contacts').addEventListener('click', () => {
   const input = document.createElement('input');
   input.type = 'file';
+  input.multiple = true;
   input.accept = '.vcf,.csv,text/vcard,text/csv';
   input.addEventListener('change', () => {
-    if (input.files && input.files[0]) importContactsFile(input.files[0]).catch(alertError);
+    if (input.files && input.files.length) {
+      importContactsFiles([...input.files]).catch(alertError);
+    }
   });
   input.click();
 });
