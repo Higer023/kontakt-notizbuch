@@ -52,6 +52,10 @@ class HttpError extends Error {
 export default {
   // Gunluk ozet: bekleyen kuyruk varsa abonelere bos push gonderilir.
   async scheduled(event, env, ctx) {
+    // Log retention must run even when nobody logs in for an extended period.
+    ctx.waitUntil(cleanupExpiredLoginLogs(env).catch((err) => {
+      console.error('login log retention cleanup failed', err);
+    }));
     ctx.waitUntil(sendDigest(env));
   },
   async fetch(request, env) {
@@ -430,6 +434,11 @@ function deviceSummary(ua) {
     : /Safari\//.test(u) ? 'Safari' : 'Diger';
   return { device, browser };
 }
+async function cleanupExpiredLoginLogs(env) {
+  await env.DB.prepare("DELETE FROM login_logs_v2 WHERE created_at < datetime('now', ?)")
+    .bind(`-${LOG_RETENTION_DAYS} days`).run();
+}
+
 async function recordFootprint(env, request, ip, event, success, clientFp) {
   // clientFp bilerek kullanilmaz: istemciden gelen ham parmak izi artik kaydedilmez.
   const fullUa = (request.headers.get('User-Agent') || '').slice(0, 300);
