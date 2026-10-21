@@ -100,6 +100,23 @@ const authReq = (method, path, token, body) => new Request('https://example.test
 const envFor = (DB) => ({ DB, LOG_KEY: TEST_LOG_KEY, TURNSTILE_SECRET: 'test', ASSETS: { fetch: async () => new Response('a') } });
 const U1 = 'tok-user1-aaaaaaaa', U2 = 'tok-user2-bbbbbbbb';
 
+await test('Passkey kayit secenekleri her kullanici icin ayri ve kararlı user handle verir', async () => {
+  const { db, DB } = makeDb(); db.exec(schema); seedUsers(db);
+  db.exec(`UPDATE sessions SET reauth_until = datetime('now', '+1 hour')`);
+  const r1 = await worker.fetch(authReq('POST', '/api/passkey/register/options', U1, {}), envFor(DB));
+  const r2 = await worker.fetch(authReq('POST', '/api/passkey/register/options', U2, {}), envFor(DB));
+  assert.equal(r1.status, 200, `u1: ${r1.status}`);
+  assert.equal(r2.status, 200, `u2: ${r2.status}`);
+  const a = await r1.json(); const b = await r2.json();
+  assert.notEqual(a.user.id, b.user.id, 'farkli hesaplar ayni WebAuthn user handle kullanmamali');
+  assert.equal(a.user.name, 'u1'); assert.equal(b.user.name, 'u2');
+  assert.equal(a.user.id, (await (async () => {
+    const again = await worker.fetch(authReq('POST', '/api/passkey/register/options', U1, {}), envFor(DB));
+    return (await again.json()).user.id;
+  })()), 'ayni hesapta user handle kararlı olmali');
+});
+
+
 await test('push kuyrugu ve abonelik islemleri yonetici olmayan kullaniciya kapali', async () => {
   const { db, DB } = makeDb(); db.exec(schema); seedUsers(db);
   for (const [method, path, body] of [

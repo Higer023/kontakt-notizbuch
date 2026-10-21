@@ -1412,11 +1412,15 @@ async function passkeyLoginOptions(env, url) {
 
 async function passkeyRegisterOptions(env, url, uid = 1) {
   const challenge = await newChallenge(env, 'register');
+  const user = await env.DB.prepare('SELECT username FROM users WHERE id = ? AND pending = 0').bind(uid).first();
+  if (!user) throw new HttpError(404, 'Kullanici bulunamadi');
   const rows = await env.DB.prepare('SELECT id FROM webauthn_credentials WHERE user_id = ?').bind(uid).all();
+  // WebAuthn user handles must be stable per account, but different between accounts.
+  const userHandle = b64uEncode(await digestBytes(new TextEncoder().encode(`kontakt-notizbuch-user:${uid}`)));
   return json({
     challenge,
     rp: { id: url.hostname, name: 'Rehber' },
-    user: { id: b64uEncode(new TextEncoder().encode('rehber-admin')), name: 'rehber', displayName: 'Rehber' },
+    user: { id: userHandle, name: user.username, displayName: user.username },
     excludeCredentials: (rows.results || []).map((r) => r.id),
   });
 }
