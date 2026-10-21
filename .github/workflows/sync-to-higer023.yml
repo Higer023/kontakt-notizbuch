@@ -1,13 +1,11 @@
-
 name: Automatic Sync to Higer023
 
 on:
   push:
-    branches:
-      - main
-  workflow_dispatch:
+    branches: [main]
   schedule:
     - cron: "17 5 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -17,82 +15,79 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  sync:
-    name: Copy, verify and commit
+  sync-pr:
+    name: Create/update target sync PR
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
+    env:
+      GH_TOKEN: ${{ secrets.SYNC_PR_TOKEN }}
+      TARGET: Higer023/kontakt-notizbuch
+      SOURCE: Higer23/kontakt-notizbuch
+      SYNC_BRANCH: sync/higer23-main
     steps:
-      - name: Checkout source repository
+      - name: Checkout source main
         uses: actions/checkout@v4
         with:
-          repository: Higer23/kontakt-notizbuch
           ref: main
           path: source
           persist-credentials: false
 
-      - name: Checkout target main
-        uses: actions/checkout@v4
-        with:
-          repository: Higer023/kontakt-notizbuch
-          ref: main
-          token: ${{ secrets.SYNC_PR_TOKEN }}
-          path: target
-          persist-credentials: true
-
-      - name: Validate repositories and token
+      - name: Validate token and target repository
         shell: bash
         run: |
           set -euo pipefail
-          test -f source/README.md
-          test -f source/.github/workflows/sync-to-higer023.yml
-          test -d target/.git
-          git -C source status --short
-          git -C target status --short
-          echo "Source and target check passed."
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::SYNC_PR_TOKEN secret is missing or empty."
+            exit 1
+          fi
+          gh api "repos/$TARGET" --jq .full_name
+          gh api "repos/$TARGET/branches/main" --jq .name
 
-      - name: Copy source files
+      - name: Prepare target sync branch
         shell: bash
         run: |
           set -euo pipefail
-
-          # Do not copy Git metadata or overwrite target's own sync workflow.
-          rsync -a --checksum \
-            --exclude='.git/' \
-            --exclude='.github/workflows/sync-to-higer023.yml' \
-            source/ target/
-
-      - name: Verify copied files
-        shell: bash
-        run: |
-          set -euo pipefail
-          diff -qr \
-            --exclude='.git' \
-            --exclude='sync-to-higer023.yml' \
-            source target
-          echo "Copied source files verified."
-
-      - name: Commit and push to target main
-        working-directory: target
-        env:
-          GH_TOKEN: ${{ secrets.SYNC_PR_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/$TARGET.git" target
+          cd target
           git config user.name "Higer23 Sync Bot"
           git config user.email "higer23-sync-bot@users.noreply.github.com"
+          git fetch origin main
+          git checkout -B "$SYNC_BRANCH" origin/main
+
+          # Copy source files into the target branch. Keep the target's own
+          # synchronization workflow so the target cannot overwrite its guard.
+          rsync -a --delete             --exclude='.git/'             --exclude='.github/workflows/sync-to-higer023.yml'             --exclude='.github/workflows/automatic-sync-to-higer023.yml'             ../source/ ./
 
           git add -A
-
           if git diff --cached --quiet; then
-            echo "Target is already synchronized."
+            echo "No file differences; target sync branch already matches source."
+            echo "SYNC_CHANGED=false" >> "$GITHUB_ENV"
             exit 0
           fi
 
           git commit -m "chore(sync): update from Higer23 main"
+          git push --force-with-lease origin "$SYNC_BRANCH"
+          echo "SYNC_CHANGED=true" >> "$GITHUB_ENV"
 
-          # Never force-push. If main moved concurrently, fail safely.
-          git push origin HEAD:main
+      - name: Open or update target pull request
+        if: env.SYNC_CHANGED == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          PR_NUMBER=$(gh pr list --repo "$TARGET" --state open             --head "Higer023:$SYNC_BRANCH" --base main --json number --jq '.[0].number // empty')
 
-          echo "Synchronization commit pushed successfully."
+          if [ -z "$PR_NUMBER" ]; then
+            gh pr create --repo "$TARGET"               --base main               --head "$SYNC_BRANCH"               --title "Sync Higer23 main into Higer023 main"               --body "Automated synchronization from Higer23/main. Required target checks must pass before merge."
+            PR_NUMBER=$(gh pr list --repo "$TARGET" --state open               --head "Higer023:$SYNC_BRANCH" --base main --json number --jq '.[0].number')
+          fi
+
+          echo "Sync PR: https://github.com/$TARGET/pull/$PR_NUMBER"
+          echo "PR_NUMBER=$PR_NUMBER" >> "$GITHUB_ENV"
+
+      - name: Enable automatic merge after required checks pass
+        if: env.SYNC_CHANGED == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh pr merge "$PR_NUMBER" --repo "$TARGET" --auto --squash
+          echo "Auto-merge enabled; GitHub will merge only after required checks pass."
