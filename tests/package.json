@@ -1,0 +1,8 @@
+{
+  "name": "kontakt-tests",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "sql.js": "1.11.0"
+  }
+}
