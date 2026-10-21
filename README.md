@@ -69,6 +69,8 @@ Suggested first tasks:
 - [Issue #25 — Mobile and desktop browser smoke-test checklist](https://github.com/Higer23/kontakt-notizbuch/issues/25)
 - [Issue #26 — Account recovery regression tests](https://github.com/Higer23/kontakt-notizbuch/issues/26)
 
+For manual browser coverage, use the [manual browser smoke-test checklist](docs/manual-smoke-test.md).
+
 Please report potential vulnerabilities according to [SECURITY.md](SECURITY.md), not in public issues.
 
 ### Security and privacy
@@ -133,6 +135,8 @@ Başlangıç için:
 - [Issue #25 — Mobil ve masaüstü tarayıcı test listesi](https://github.com/Higer23/kontakt-notizbuch/issues/25)
 - [Issue #26 — Hesap kurtarma regresyon testleri](https://github.com/Higer23/kontakt-notizbuch/issues/26)
 
+Manuel tarayıcı kontrolleri için [manuel tarayıcı test listesini](docs/manual-smoke-test.md) kullanın.
+
 Olası güvenlik açıklarını herkese açık issue yerine [SECURITY.md](SECURITY.md) yönergelerine göre bildirin.
 
 ### Güvenlik ve gizlilik
@@ -193,6 +197,8 @@ Beiträge sind willkommen! Lesen Sie vor dem Start den **[Leitfaden für Beiträ
 Geeignete Einstiegsaufgaben:
 - [Issue #25 — Checkliste für Browser-Tests auf Mobilgeräten und Desktop](https://github.com/Higer23/kontakt-notizbuch/issues/25)
 - [Issue #26 — Regressionstests für die Kontowiederherstellung](https://github.com/Higer23/kontakt-notizbuch/issues/26)
+
+Für manuelle Browserprüfungen verwenden Sie die [Checkliste für manuelle Browser-Smoke-Tests](docs/manual-smoke-test.md).
 
 Melden Sie mögliche Sicherheitslücken gemäß [SECURITY.md](SECURITY.md), nicht in öffentlichen Issues.
 
