@@ -73,4 +73,21 @@ test('depoda gizli anahtar desenleri yok', () => {
   }
 });
 
+test('ui-plus dosyalari index.html ve servis calisanina bagli', () => {
+  const html = read('public/index.html');
+  const sw = read('public/sw.js');
+  assert.ok(html.includes('href="/ui-plus.css"'), 'index.html ui-plus.css baglamiyor');
+  assert.ok(html.includes('src="/ui-plus.js"'), 'index.html ui-plus.js baglamiyor');
+  assert.ok(html.indexOf('/style.css') < html.indexOf('/ui-plus.css'), 'ui-plus.css, style.css den sonra yuklenmeli');
+  assert.ok(sw.includes("'/ui-plus.css'") && sw.includes("'/ui-plus.js'"), 'sw.js onbellek listesinde yok');
+});
+
+test('ui-plus.css suslu parantezleri dengeli ve mobil kurallari iceriyor', () => {
+  const css = read('public/ui-plus.css');
+  assert.equal(css.split('{').length, css.split('}').length, 'parantez dengesi bozuk');
+  for (const needle of ['safe-area-inset-bottom', '(pointer: coarse)', 'prefers-reduced-motion', '100lvh', 'font-size: 16px']) {
+    assert.ok(css.includes(needle), `eksik: ${needle}`);
+  }
+});
+
 console.log(`\n${passed} test gecti`);
