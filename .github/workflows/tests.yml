@@ -1,29 +1,123 @@
-name: Testler (dagitim yok)
+name: Quality Gate
 
 on:
   pull_request:
+    branches: [main]
   push:
-    branches:
-      - 'feature/**'
+  schedule:
+    - cron: '23 5 * * 1'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: quality-gate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
+  tests:
+    name: Tests (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['20', '22']
+    steps:
+      - name: Checkout without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test-only dependencies
+        run: npm install --prefix tests --no-audit --no-fund
+      - name: Run every suite and produce a complete report
+        shell: bash
+        run: |
+          set -uo pipefail
+          REPORT_DIR="$RUNNER_TEMP/kontakt-test-reports"
+          mkdir -p "$REPORT_DIR"
+          : > "$REPORT_DIR/status.txt"
+
+          run_suite() {
+            local name="$1"
+            shift
+            echo "::group::Suite: $name"
+            set +e
+            "$@" 2>&1 | tee "$REPORT_DIR/$name.log"
+            local result=${PIPESTATUS[0]}
+            set -e
+            printf '%s|%s\n' "$name" "$result" >> "$REPORT_DIR/status.txt"
+            echo "::endgroup::"
+          }
+
+          run_suite static node tests/static.test.mjs
+          run_suite behavior node tests/behavior.test.mjs
+          run_suite crypto node tests/crypto.test.mjs
+          run_suite csv node tests/csv.test.mjs
+          run_suite schema python tests/schema.test.py
+
+          node tests/verify-test-count.mjs "$REPORT_DIR"
+      - name: Upload full test logs (success or failure)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report-node-${{ matrix.node-version }}
+          path: ${{ runner.temp }}/kontakt-test-reports/
+          if-no-files-found: warn
+          retention-days: 14
+
+  dependency-audit:
+    name: Dependency vulnerability audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Bagimliliklar (tests/)
-        run: cd tests && npm install --no-audit --no-fund
-      - name: Statik testler ve sozdizimi
-        run: node tests/static.test.mjs
-      - name: Davranissal testler (sahte D1)
-        run: node tests/behavior.test.mjs
-      - name: Istemci sifreleme regresyon testleri
-        run: node tests/crypto.test.mjs
-      - name: CSV formula injection regression tests
-        run: node tests/csv.test.mjs
+      - name: Install test dependencies and create a lockfile for the audit
+        run: npm install --prefix tests --ignore-scripts --no-audit --no-fund
+      - name: Audit dependencies
+        run: npm audit --prefix tests --audit-level=high
+
+  repository-integrity:
+    name: Repository integrity and secret hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+      - name: Validate JSON and essential project files
+        run: node tests/repository-integrity.test.mjs
+
+  # Legacy branch rules may still require the exact status-check name "test".
+  # This aggregate check preserves that name and fails if any quality gate fails.
+  test:
+    name: test
+    if: always()
+    needs: [tests, dependency-audit, repository-integrity]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every quality gate to pass
+        env:
+          TESTS_RESULT: ${{ needs.tests.result }}
+          AUDIT_RESULT: ${{ needs['dependency-audit'].result }}
+          INTEGRITY_RESULT: ${{ needs['repository-integrity'].result }}
+        shell: bash
+        run: |
+          printf 'Tests: %s\nDependency audit: %s\nRepository integrity: %s\n' "$TESTS_RESULT" "$AUDIT_RESULT" "$INTEGRITY_RESULT"
+          [[ "$TESTS_RESULT" == "success" && "$AUDIT_RESULT" == "success" && "$INTEGRITY_RESULT" == "success" ]]
