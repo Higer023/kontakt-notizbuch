@@ -201,4 +201,14 @@ await test('herkese acik yollar tanimli (giris/kurtarma/kayit)', async () => {
   for (const p of PUBLIC_ROUTES) assert.ok(workerSrc.includes("'" + p + "'"), `yol bulunamadi: ${p}`);
 });
 
+await test('kullanicisiz (eski) oturum kabul edilmez, yonetici sayilmaz', async () => {
+  const { db, DB } = makeDb(); db.exec(schema); seedUsers(db);
+  db.exec("INSERT INTO sessions (token_hash, expires_at, user_id) VALUES ('" + sha256hex('tok-eski-cccccccc') + "', datetime('now', '+1 hour'), NULL)");
+  db.exec("UPDATE users SET is_admin = 0");
+  const r = await worker.fetch(authReq('GET', '/api/sessions', 'tok-eski-cccccccc'), envFor(DB));
+  assert.equal(r.status, 401, `beklenen 401, gelen ${r.status}`);
+  const r2 = await worker.fetch(authReq('GET', '/api/logs', 'tok-eski-cccccccc'), envFor(DB));
+  assert.equal(r2.status, 401, `beklenen 401 (loglar), gelen ${r2.status}`);
+});
+
 console.log(`\n${passed} test gecti`);
