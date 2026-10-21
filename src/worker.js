@@ -118,6 +118,7 @@ async function handleApi(request, env, url) {
   if (pathname === '/api/passkey/list' && method === 'GET') return passkeyList(env);
   if (pathname === '/api/passkey/delete' && method === 'POST') { requireFresh(); return passkeyDelete(request, env); }
   if (pathname === '/api/recovery/rotate' && method === 'POST') { requireFresh(); return recoveryRotate(request, env); }
+  if (pathname === '/api/user/recovery/rotate' && method === 'POST') { requireFresh(); return userRecoveryRotate(request, env, session); }
   if (pathname.startsWith('/api/push/')) return handlePush(request, env, url, { readJson, json, HttpError });
   // Kayitlar ve IP listesi sifreli: okumak icin yeniden parola gerekir
   if (pathname === '/api/logs' && method === 'GET') {
@@ -1112,6 +1113,27 @@ async function userRecoveryLogin(request, env, ip) {
   await recordFootprint(env, request, ip, 'recovery', ok, body.fp);
   if (!ok) throw new HttpError(401, 'Kullanici adi veya kurtarma kodu hatali');
   return json({ ok: true, blob: u.recovery_blob }, 200, { 'Set-Cookie': await passkeySessionCookie(request, env, u.id) });
+}
+
+// Oturumdaki kullanici icin yeni kurtarma kodu: eski kod gecersiz olur, kod e-postaya gider
+async function userRecoveryRotate(request, env, session) {
+  const body = await readJson(request);
+  const email = typeof body.email === 'string' ? body.email.trim().slice(0, 254) : '';
+  if (!EMAIL_RE.test(email)) throw new HttpError(400, 'Gecerli bir e-posta adresi girin');
+  const code = normalizeRecoveryCode(body.code);
+  const blob = typeof body.blob === 'string' ? body.blob : '';
+  if (code.length < 20 || code.length > 64 || blob.length < 20 || blob.length > 4000) {
+    throw new HttpError(400, 'Gecersiz istek');
+  }
+  try {
+    await sendRecoveryMailTo(env, email, code.match(/.{1,5}/g).join('-'));
+  } catch {
+    throw new HttpError(502, 'E-posta gonderilemedi. Tekrar deneyin.');
+  }
+  const hash = hexOf(await digestBytes(new TextEncoder().encode(code)));
+  await env.DB.prepare('UPDATE users SET recovery_hash = ?, recovery_blob = ? WHERE id = ?')
+    .bind(hash, blob, session.user_id).run();
+  return json({ ok: true });
 }
 
 function unb64(s) {
