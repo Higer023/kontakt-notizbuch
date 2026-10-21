@@ -1067,6 +1067,18 @@ async function signupFinish(request, env, ip, url) {
   const recHash = typeof rec.code_hash === 'string' && /^[0-9a-f]{64}$/.test(rec.code_hash) ? rec.code_hash : null;
   const recBlob = typeof rec.blob === 'string' && rec.blob.length >= 20 && rec.blob.length <= 4000 ? rec.blob : null;
   if (!recHash || !recBlob) throw new HttpError(400, 'Kurtarma kodu eksik');
+  // Kurtarma kodu e-postaya gonderilir; kod sunucuda tutulmaz, yalnizca ozeti karsilastirilir
+  const email = typeof peek.email === 'string' ? peek.email.trim().slice(0, 254) : '';
+  if (!EMAIL_RE.test(email)) throw new HttpError(400, 'Gecerli bir e-posta adresi girin');
+  const code = normalizeRecoveryCode(peek.code);
+  if (code.length < 20 || hexOf(await digestBytes(new TextEncoder().encode(code))) !== recHash) {
+    throw new HttpError(400, 'Kurtarma kodu uyusmuyor');
+  }
+  try {
+    await sendRecoveryMailTo(env, email, code.match(/.{1,5}/g).join('-'));
+  } catch {
+    throw new HttpError(502, 'E-posta gonderilemedi. Adresi kontrol edip tekrar deneyin.');
+  }
   await passkeyRegisterVerify(request, env, url, uid);
   await env.DB.prepare('UPDATE users SET pending = 0, recovery_hash = ?, recovery_blob = ? WHERE id = ?').bind(recHash, recBlob, uid).run();
   await recordFootprint(env, request, ip, 'signup', true, peek.fp);
@@ -1584,6 +1596,24 @@ function recoveryMailHtml(displayCode) {
 </table>
 </body>
 </html>`.replace('{{CODE}}', safe);
+}
+
+// Kullaniciya kurtarma kodu gonderir (adres saklanmaz)
+async function sendRecoveryMailTo(env, to, displayCode) {
+  if (!env.RESEND_API_KEY) throw new Error('mail yapilandirilmamis');
+  const safe = String(displayCode).replace(/[^A-Za-z0-9-]/g, '');
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: 'Rehber <onboarding@resend.dev>',
+      to: [to],
+      subject: 'Rehber kurtarma kodu',
+      html: recoveryMailHtml(safe),
+      text: `Kurtarma kodunuz:\n\n${safe}\n\nBu kodu kimseyle paylasmayin. Parolanizi unutursaniz bu kodla giris yapabilirsiniz.`,
+    }),
+  });
+  if (!res.ok) throw new Error('mail hatasi ' + res.status);
 }
 
 async function sendRecoveryMail(env, displayCode) {
