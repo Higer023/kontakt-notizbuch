@@ -22,7 +22,6 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.SYNC_PR_TOKEN }}
       TARGET: Higer023/kontakt-notizbuch
-      SOURCE: Higer23/kontakt-notizbuch
       SYNC_BRANCH: sync/higer23-main
     steps:
       - name: Checkout source main
@@ -54,13 +53,12 @@ jobs:
           git fetch origin main
           git checkout -B "$SYNC_BRANCH" origin/main
 
-          # Copy source files into the target branch. Keep the target's own
-          # synchronization workflow so the target cannot overwrite its guard.
-          rsync -a --delete             --exclude='.git/'             --exclude='.github/workflows/sync-to-higer023.yml'             --exclude='.github/workflows/automatic-sync-to-higer023.yml'             ../source/ ./
+          # Preserve target-only GitHub workflows; sync application files from source.
+          rsync -a --delete             --exclude='.git/'             --exclude='.github/'             --exclude='stable/'             ../source/ ./
 
           git add -A
           if git diff --cached --quiet; then
-            echo "No file differences; target sync branch already matches source."
+            echo "No file differences to synchronize."
             echo "SYNC_CHANGED=false" >> "$GITHUB_ENV"
             exit 0
           fi
@@ -78,16 +76,38 @@ jobs:
 
           if [ -z "$PR_NUMBER" ]; then
             gh pr create --repo "$TARGET"               --base main               --head "$SYNC_BRANCH"               --title "Sync Higer23 main into Higer023 main"               --body "Automated synchronization from Higer23/main. Required target checks must pass before merge."
-            PR_NUMBER=$(gh pr list --repo "$TARGET" --state open               --head "Higer023:$SYNC_BRANCH" --base main --json number --jq '.[0].number')
+            PR_NUMBER=$(gh pr list --repo "$TARGET" --state open               --head "Higer023:$SYNC_BRANCH" --base main --json number --jq '.[0].number // empty')
           fi
 
+          if [ -z "$PR_NUMBER" ]; then
+            echo "::error::Could not find or create the sync pull request."
+            exit 1
+          fi
           echo "Sync PR: https://github.com/$TARGET/pull/$PR_NUMBER"
           echo "PR_NUMBER=$PR_NUMBER" >> "$GITHUB_ENV"
+          echo "SYNC_PR_URL=https://github.com/$TARGET/pull/$PR_NUMBER" >> "$GITHUB_ENV"
 
-      - name: Enable automatic merge after required checks pass
+      - name: Enable auto-merge after required checks pass
         if: env.SYNC_CHANGED == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          gh pr merge "$PR_NUMBER" --repo "$TARGET" --auto --squash
-          echo "Auto-merge enabled; GitHub will merge only after required checks pass."
+          # Auto-merge must be enabled on the target repository. Try enabling it
+          # with the token's administration permission; do not weaken branch rules.
+          if ! gh api --method PATCH "repos/$TARGET" -F allow_auto_merge=true >/dev/null; then
+            echo "::warning::Could not enable repository auto-merge. The sync PR remains open and protected."
+            echo "Auto-merge setting could not be changed; review/enable it in target repository settings." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if gh pr merge "$PR_NUMBER" --repo "$TARGET" --auto --squash; then
+            echo "Auto-merge requested. GitHub will merge only after required checks pass."
+            echo "Auto-merge requested for $SYNC_PR_URL" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::GitHub refused to enable auto-merge. The sync PR remains open; no branch protection was bypassed."
+            echo "Auto-merge could not be requested. Review $SYNC_PR_URL and target settings." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Report no changes
+        if: env.SYNC_CHANGED == 'false'
+        run: echo "Source and target sync branch already match; nothing to do."
