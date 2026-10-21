@@ -34,6 +34,13 @@
     return data;
   }
 
+  // Tarayici hata adlarini kullaniciya anlasilir metne cevirir
+  function friendly(err) {
+    if (err && err.name === 'NotAllowedError') return 'Parmak izi islemi iptal edildi veya zaman asimina ugradi.';
+    if (err && err.name === 'InvalidStateError') return 'Bu cihaz icin zaten bir parmak izi kayitli.';
+    return (err && err.message) || 'Bir hata olustu.';
+  }
+
   function el(tag, attrs, text) {
     const n = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs || {})) n.setAttribute(k, v);
@@ -166,7 +173,13 @@
     } catch {
       throw new Error('Kurtarma kodu hatali.');
     }
-    await unlockVault(password);
+    try {
+      await unlockVault(password);
+    } catch (e) {
+      // Kasa acilamadiysa sunucu oturumunu kapat
+      await post('/api/logout', {}).catch(() => {});
+      throw e;
+    }
   }
 
   // ---------- Baglanti ----------
@@ -224,7 +237,9 @@
         signupDlg.close();
         showApp();
       } catch (err) {
-        $('#su-error').textContent = err.message;
+        $('#su-error').textContent = friendly(err);
+        if (/dogrulama|Dogrulama|Turnstile/i.test(err.message || '')) window.turnstile?.reset();
+        turnstileToken = '';
       }
     });
 
@@ -238,7 +253,9 @@
         recDlg.close();
         showApp();
       } catch (err) {
-        $('#rl-error').textContent = err.message;
+        $('#rl-error').textContent = friendly(err);
+        if (/dogrulama|Dogrulama|Turnstile/i.test(err.message || '')) window.turnstile?.reset();
+        turnstileToken = '';
       }
     });
   }
