@@ -1,64 +1,81 @@
-# Kisisel Iletisim Rehberi ve Not Defteri
+# Kontakt-Notizbuch — Kişisel İletişim Rehberi ve Not Defteri
 
 [![Lisans: MIT](https://img.shields.io/badge/Lisans-MIT-yellow.svg)](LICENSE)
 
-Cloudflare Workers (API + statik dosyalar), D1 (SQL) ve R2 (fotograflar) uzerinde calisan, tek yoneticili, karanlik temali kisi rehberi.
+Cloudflare Workers, D1 ve R2 üzerinde çalışan, yönetici oturumuyla korunan, karanlık temalı bir kişi ve iletişim defteri. Proje; kişileri, notları ve ilgili verileri düzenlemeyi, erişimi sunucu tarafında denetlemeyi ve hassas verileri korumayı amaçlar.
 
-## Ozellikler
-- Yonetici girisi: PBKDF2-SHA256 (100k iterasyon). Oturum token'i yalnizca SHA-256 ozeti olarak saklanir. Cookie: HttpOnly; Secure; SameSite=Strict.
-- Brute-force korumasi: IP basina 15 dakikada 5 hatali deneme sonrasi 429 kilidi.
-- Giris loglari ekrani (basarili/basarisiz, IP, tarayici).
-- Esnek dogum tarihi (yil / ay / gun) ve otomatik yas hesabi.
-- Sosyal medya: platform secimi + kullanici adindan otomatik profil linki.
-- Fotograf yukleme (JPEG/PNG/WebP, en fazla 5 MB), R2'de, yalnizca yetkili oturumla erisilebilir.
-- Arama (isim, soyisim, sehir, etiket, e-posta).
-- Guvenlik basliklari: CSP, HSTS, X-Frame-Options DENY, nosniff.
+> **Durum:** Aktif geliştirme sürümüdür. Güvenlik açısından kritik bir uygulama olarak değerlendirin; üretimde kullanmadan önce kendi gereksinimlerinize göre denetleyin. Gerçek kişisel verilerle test yapmayın.
 
-## Kurulum
+## Özellikler
+- Yönetici girişi ve güvenli oturum çerezi.
+- Giriş denemeleri için hız sınırı ve giriş kayıtları.
+- Kişi arama, etiketler, doğum tarihi ve yaş hesaplama.
+- Sosyal profil bağlantıları ve fotoğraf yükleme (Cloudflare R2).
+- Cloudflare Worker API'si ve D1 veritabanı.
+- Passkey/WebAuthn ve şifreli kasa özellikleri (ilgili yapılandırma ve akışlara bağlıdır).
+- Güvenlik başlıkları ve GitHub Actions test/deploy iş akışları.
 
-### 1. Cloudflare kaynaklari
-```bash
-npx wrangler login
-npx wrangler d1 create kontakt-db          # database_id'yi wrangler.toml'a yaz
-npx wrangler r2 bucket create kontakt-photos
-```
+## Teknoloji yığını
+- JavaScript, HTML ve CSS
+- Cloudflare Workers, D1 ve R2
+- Wrangler CLI
+- Node.js testleri ve GitHub Actions
 
-### 2. Yonetici sifresi
-```bash
-node scripts/hash-password.mjs "en-az-12-karakterli-guclu-sifre"
-```
-Cikan hash ile:
-```bash
-npx wrangler d1 execute kontakt-db --remote --command \
-  "INSERT INTO admin (id, password_hash) VALUES (1, 'HASH') ON CONFLICT(id) DO UPDATE SET password_hash = excluded.password_hash;"
-```
-Sifreyi repoya yazmayin.
+## Yerel geliştirme
 
-### 3. Sema
-```bash
-npx wrangler d1 execute kontakt-db --remote --file=schema.sql
-```
+### Gereksinimler
+- Desteklenen güncel bir Node.js sürümü ve npm
+- Cloudflare hesabı (yalnızca uzak D1/R2 veya gerçek dağıtım için)
+- Wrangler CLI, `npx` üzerinden çalıştırılabilir
 
-### 4. GitHub ve otomatik deploy
-Repo Settings > Secrets and variables > Actions icine ekleyin:
-- `CLOUDFLARE_API_TOKEN` (Workers, D1 ve R2 yetkili)
-- `CLOUDFLARE_ACCOUNT_ID`
+### Kurulum
+1. Depoyu çatallayın (Fork) ve klonlayın:
+   ```bash
+   git clone https://github.com/Higer23/kontakt-notizbuch.git
+   cd kontakt-notizbuch
+   ```
+2. Yerel testleri çalıştırın:
+   ```bash
+   node tests/crypto.test.mjs
+   node tests/csv.test.mjs
+   node tests/run-tests.mjs
+   ```
+3. Wrangler'ı Cloudflare hesabınıza bağlamak gerekiyorsa:
+   ```bash
+   npx wrangler login
+   ```
+4. `wrangler.toml` içindeki D1/R2 binding ve kaynak adlarını kontrol edin. Gerçek kaynaklar oluşturacaksanız kendi Cloudflare hesabınızda oluşturun ve ilgili kimlikleri yerel yapılandırmanıza girin.
+5. Yerel geliştirme sunucusunu başlatın:
+   ```bash
+   npx wrangler dev
+   ```
 
-`main` dalina her push'ta `.github/workflows/deploy.yml` semayi uygular ve deploy eder.
+> **Dikkat:** Uzak ortamı değiştiren komutları çalıştırmadan önce yapılandırmayı kontrol edin. `schema.sql` uygulamak veya üretime dağıtım yapmak mevcut verileri etkileyebilir. Üretim veritabanına karşı deneme yapmayın.
 
-### 5. Yerel gelistirme
-```bash
-npx wrangler dev --remote
-```
+## Katkıda bulunma
+Katkılar memnuniyetle karşılanır. Kod yazmadan önce [CONTRIBUTING.md](CONTRIBUTING.md) dosyasını okuyun ve açık issue'ları inceleyin. Başlamak için [`good first issue`](https://github.com/Higer23/kontakt-notizbuch/labels/good%20first%20issue) ve [`help wanted`](https://github.com/Higer23/kontakt-notizbuch/labels/help%20wanted) etiketlerini kullanın.
 
-## Guvenlik notlari
-- Sifreyi duzenli degistirin, ardindan `DELETE FROM sessions;` ile mevcut oturumlari kapatin.
-- Cloudflare Access (Zero Trust) ile uygulamanin onune e-posta/OTP katmani koymaniz onerilir.
-- Fotograflar R2 URL'si ile degil yalnizca `/api/photos/:id` uzerinden, oturum kontrolu ile sunulur.
-- Kisisel veri icerdiginden D1 yedeklerini (`wrangler d1 export`) duzenli alin.
+1. Bir issue üzerinde çalışmak istediğinizi yorumla belirtin; bakım ekibinden onay/atanma bekleyin.
+2. Değişiklik için ayrı bir dal açın.
+3. İlgili testleri çalıştırın ve yeni davranış için test ekleyin.
+4. Açıklayıcı bir pull request (PR) gönderin; neyin değiştiğini, nedenini ve test sonuçlarını yazın.
+5. PR'daki geri bildirimleri ele alın. Değişiklikler `main` dalına doğrudan gönderilmemelidir.
+
+Güvenlik açığı bildirimlerini herkese açık issue olarak yayımlamayın; yönergeler için [SECURITY.md](SECURITY.md) dosyasına bakın.
+
+## Güvenlik ve kişisel veriler
+- Gerçek parola, API token'ı, Cloudflare sırrı veya kişisel veri commit etmeyin.
+- Testlerde sahte veriler kullanın.
+- D1/R2 kaynaklarını ve yedekleri koruyun; üretim verilerine dokunan değişiklikleri ayrıca belirtin.
+- Güvenlik politikası: [SECURITY.md](SECURITY.md).
 
 ## Lisans
-Bu proje [MIT Lisansi](LICENSE) ile sunulur. Kodu kullanabilir, degistirebilir ve dagitabilirsiniz; telif ve lisans metnini korumaniz yeterlidir.
+Bu proje [MIT Lisansı](LICENSE) ile sunulur.
 
-## Destek / Sponsorluk
-Projeyi [Open Collective](https://opencollective.com/kontakt-notizbuch) uzerinden destekleyebilirsiniz. Destek, MIT lisansini degistirmez: proje herkes icin MIT olarak kalir.
+## Destek
+Projeyi [Open Collective](https://opencollective.com/kontakt-notizbuch) üzerinden destekleyebilirsiniz. Destek, MIT lisansını değiştirmez.
+
+---
+
+### English summary
+Kontakt-Notizbuch is a dark-themed personal contact notebook built on Cloudflare Workers, D1 and R2. Contributions are welcome: read [CONTRIBUTING.md](CONTRIBUTING.md), choose an issue labelled [`good first issue`](https://github.com/Higer23/kontakt-notizbuch/labels/good%20first%20issue) or [`help wanted`](https://github.com/Higer23/kontakt-notizbuch/labels/help%20wanted), and submit your work as a pull request. Do not use real personal data in tests; this project is under active development and has not been certified as secure.

@@ -1,36 +1,43 @@
-Contributing to Kontakt-Notizbuch
+# Katkı Rehberi
 
-Thank you for your interest in contributing to Kontakt-Notizbuch!
+Katkılarınızı memnuniyetle karşılıyoruz. Küçük, odaklı ve test edilebilir PR'lar incelemeyi kolaylaştırır.
 
-How to contribute
+## Başlamadan önce
+- Önce README ve [SECURITY.md](SECURITY.md) dosyalarını okuyun.
+- Açık issue'ları kontrol edin. `good first issue` yeni katkı verenler için; `help wanted` ise topluluk yardımı aranan işler içindir.
+- Bir issue üzerinde çalışmadan önce yorum yapıp görevi üstlenmek istediğinizi belirtin. Aynı iş üzerinde çakışmayı önlemek için yanıt bekleyin.
+- Güvenlik açığı olabilecek ayrıntıları herkese açık issue/PR içinde yayımlamayın.
 
-You can help by:
+## Geliştirme akışı
+1. Depoyu fork edin ve kendi fork'unuzu klonlayın.
+2. `main` yerine konuya özel dal açın: `docs/...`, `fix/...` veya `test/...`.
+3. Değişikliği mümkün olduğunca küçük tutun; ilgisiz biçimlendirme veya yeniden düzenleme eklemeyin.
+4. İlgili testleri çalıştırın:
+   ```bash
+   node tests/crypto.test.mjs
+   node tests/csv.test.mjs
+   node tests/run-tests.mjs
+   ```
+5. Güvenlik veya veri işleme davranışı değişiyorsa test ekleyin ve risk/geri dönüş planını PR açıklamasına yazın.
+6. Fork'unuza push edip `Higer23/kontakt-notizbuch:main` hedefine pull request açın.
 
-- Reporting reproducible bugs.
-- Suggesting useful features.
-- Improving documentation and translations.
-- Improving accessibility and mobile usability.
-- Adding tests and fixing verified bugs.
-- Reviewing proposed changes.
+## PR kontrol listesi
+- [ ] Değişiklik tek bir amaca odaklanıyor.
+- [ ] Testler çalıştırıldı; sonuçlar PR açıklamasında belirtildi.
+- [ ] Hassas bilgi, gerçek kullanıcı verisi veya sır eklenmedi.
+- [ ] API/şema değişiklikleri ve dağıtım etkileri açıklandı.
+- [ ] README veya diğer dokümantasyon gerektiğinde güncellendi.
+- [ ] Geriye dönük uyumluluk ve hata durumları düşünüldü.
 
-Before submitting a change
+## Kod ve güvenlik ilkeleri
+- İstemciden gelen veriye güvenmeyin; yetki ve sahiplik kontrolleri sunucuda yapılmalıdır.
+- Şifreleme, kimlik doğrulama, kurtarma, oturum ve veritabanı şeması değişikliklerinde önce ilgili testleri ve etki alanını açıklayın.
+- Üretim D1/R2 kaynaklarında deneme yapmayın. Kendi geliştirme kaynaklarınızı kullanın.
+- Yeni bağımlılık ekliyorsanız gerekçesini ve bakım/güvenlik etkisini belirtin.
 
-1. Check existing issues to avoid duplicates.
-2. Describe the problem and the proposed solution.
-3. Keep changes focused and easy to review.
-4. Run the relevant tests when possible.
-5. Never include passwords, API keys, private contact data, or other secrets.
+## Issue türleri
+- Hata: yeniden üretme adımları, beklenen/gerçek davranış ve ortam bilgisi.
+- İyileştirme: çözülecek kullanıcı ihtiyacı ve önerilen kapsam.
+- Dokümantasyon/test: hangi adımın belirsiz veya eksik olduğu ve tamamlanma ölçütü.
 
-Pull requests
-
-Please explain what changed, why it was needed, and how it was tested. For security-sensitive changes, explain the security implications.
-
-Security issues
-
-Please do not publish exploitable vulnerabilities together with private data or secrets in a public issue. Contact the maintainer privately when an appropriate private reporting channel is available.
-
-Community
-
-Please be respectful, constructive, and welcoming to other contributors.
-
-Thank you for helping improve Kontakt-Notizbuch!
+Teşekkürler — her katkı önce incelenir; PR'ların birleştirilmesi testlerin ve bakımcı incelemesinin sonucuna bağlıdır.
