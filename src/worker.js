@@ -94,6 +94,8 @@ async function handleApi(request, env, url) {
   if (await isBlocked(env, ip)) throw new HttpError(403, 'Bu adres engellendi');
   await rateLimit(env, ip);
 
+  if (pathname === '/api/signup/start' && method === 'POST') return signupStart(request, env, ip, url);
+  if (pathname === '/api/signup/finish' && method === 'POST') return signupFinish(request, env, ip, url);
   if (pathname === '/api/login' && method === 'POST') return login(request, env, ip);
   if (pathname === '/api/logout' && method === 'POST') return logout(request, env);
   if (pathname === '/api/passkey/login/options' && method === 'POST') return passkeyLoginOptions(env, url);
@@ -111,7 +113,7 @@ async function handleApi(request, env, url) {
   if (pathname === '/api/reauth' && method === 'POST') return reauth(request, env, ip, session);
   if (pathname === '/api/me' && method === 'GET') return json({ ok: true });
   if (pathname === '/api/passkey/register/options' && method === 'POST') { requireFresh(); return passkeyRegisterOptions(env, url); }
-  if (pathname === '/api/passkey/register/verify' && method === 'POST') { requireFresh(); return passkeyRegisterVerify(request, env, url); }
+  if (pathname === '/api/passkey/register/verify' && method === 'POST') { requireFresh(); return passkeyRegisterVerify(request, env, url, session.user_id); }
   if (pathname === '/api/passkey/list' && method === 'GET') return passkeyList(env);
   if (pathname === '/api/passkey/delete' && method === 'POST') { requireFresh(); return passkeyDelete(request, env); }
   if (pathname === '/api/recovery/rotate' && method === 'POST') { requireFresh(); return recoveryRotate(request, env); }
@@ -135,7 +137,7 @@ async function handleApi(request, env, url) {
     requireFresh();
     return unblockIp(env, url);
   }
-  if (pathname === '/api/vault/status' && method === 'GET') return vaultStatus(env);
+  if (pathname === '/api/vault/status' && method === 'GET') return vaultStatus(env, session.user_id);
   if (pathname === '/api/vault/init' && method === 'POST') return vaultInit(request, env);
   if (pathname === '/api/vault/contacts' && method === 'GET') return vaultList(env, session.user_id);
   if (pathname === '/api/vault/contacts' && method === 'POST') return vaultCreate(request, env, session.user_id);
@@ -180,8 +182,8 @@ async function isMigrated(env) {
   return !!m;
 }
 
-async function vaultStatus(env) {
-  const v = await env.DB.prepare('SELECT salt FROM vault WHERE id = 1').first();
+async function vaultStatus(env, uid) {
+  const v = await env.DB.prepare('SELECT salt FROM users WHERE id = ?').bind(uid).first();
   return json({ salt: v ? v.salt : null, migrated: await isMigrated(env) });
 }
 
@@ -499,7 +501,7 @@ async function reauth(request, env, ip, session) {
     throw new HttpError(403, 'Konum izni olmadan islem yapilamaz');
   }
   const password = typeof body.password === 'string' ? body.password : '';
-  const ok = await verifyAdminPassword(env, null, password);
+  const ok = await verifyUserPassword(env, session.user_id, password);
   await recordFootprint(env, request, ip, 'reauth', ok, body.fp);
   if (!ok) throw new HttpError(401, 'Sifre hatali');
   await env.DB.prepare("UPDATE sessions SET reauth_until = datetime('now', ?) WHERE token_hash = ?")
@@ -978,6 +980,94 @@ function b64url(bytes) {
   return b64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
+
+// ---------- Kayit (kullanici adi + parola + parmak izi) ----------
+
+const SIGNUP_USER_RE = /^[A-Za-z0-9_.-]{3,30}$/;
+
+async function hashPassword(password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const bits = await pbkdf2(password, salt, PBKDF2_ITER);
+  return `pbkdf2$${PBKDF2_ITER}$${b64(salt)}$${b64(bits)}`;
+}
+
+async function verifyUserPassword(env, uid, password) {
+  if (!password || password.length > 1024) return false;
+  const u = await env.DB.prepare('SELECT password_hash FROM users WHERE id = ?').bind(uid).first();
+  return !!u && (await verifyPassword(password, u.password_hash));
+}
+
+// Parola + kullanici adi eslesmesi (yalnizca tamamlanmis hesaplar)
+async function userForLogin(env, body) {
+  const username = typeof body.username === 'string' ? body.username.trim().slice(0, 100) : '';
+  const password = typeof body.password === 'string' ? body.password : '';
+  if (!username || !password || password.length > 1024) return null;
+  const u = await env.DB.prepare(
+    'SELECT id, password_hash FROM users WHERE lower(username) = lower(?) AND pending = 0'
+  ).bind(username).first();
+  if (!u) return null;
+  return (await verifyPassword(password, u.password_hash)) ? u : null;
+}
+
+async function credentialOwner(env, a) {
+  if (!a || typeof a.id !== 'string') return null;
+  const row = await env.DB.prepare('SELECT user_id FROM webauthn_credentials WHERE id = ?').bind(a.id).first();
+  return row ? row.user_id : null;
+}
+
+async function signupStart(request, env, ip, url) {
+  if ((await recentFailCount(env, ip)) >= MAX_FAILS) {
+    throw new HttpError(429, 'Cok fazla hatali deneme. Lutfen daha sonra tekrar deneyin.');
+  }
+  const body = await readJson(request);
+  if (!hasGeo(body)) {
+    await recordFootprint(env, request, ip, 'signup_no_geo', false, body.fp);
+    throw new HttpError(403, 'Konum izni olmadan kayit yapilamaz');
+  }
+  if (!(await verifyTurnstile(env, body.turnstile, ip))) {
+    await recordFootprint(env, request, ip, 'signup_bot', false, body.fp);
+    throw new HttpError(403, 'Dogrulama basarisiz. Lutfen tekrar deneyin.');
+  }
+  const username = typeof body.username === 'string' ? body.username.trim() : '';
+  const password = typeof body.password === 'string' ? body.password : '';
+  const salt = typeof body.salt === 'string' ? body.salt : '';
+  if (!SIGNUP_USER_RE.test(username)) throw new HttpError(400, 'Kullanici adi 3-30 karakter olmali (harf, rakam, _ . -)');
+  if (password.length < 10 || password.length > 1024) throw new HttpError(400, 'Parola en az 10 karakter olmali');
+  if (salt.length < 16 || salt.length > 64) throw new HttpError(400, 'Gecersiz tuz');
+
+  // Yarim kalmis kayitlar temizlenir
+  await env.DB.prepare("DELETE FROM users WHERE pending = 1 AND created_at < datetime('now', '-15 minutes')").run();
+  const taken = await env.DB.prepare('SELECT id FROM users WHERE lower(username) = lower(?) AND pending = 0').bind(username).first();
+  if (taken) throw new HttpError(409, 'Bu kullanici adi alinmis');
+  await env.DB.prepare('DELETE FROM users WHERE pending = 1 AND lower(username) = lower(?)').bind(username).run();
+
+  const hash = await hashPassword(password);
+  const row = await env.DB.prepare(
+    'INSERT INTO users (username, password_hash, salt, is_admin, pending) VALUES (?, ?, ?, 0, 1) RETURNING id'
+  ).bind(username, hash, salt).first();
+  const challenge = await newChallenge(env, 'register');
+  return json({
+    user_id: row.id,
+    challenge,
+    rp: { id: url.hostname, name: 'Rehber' },
+    user: { id: b64uEncode(new TextEncoder().encode(String(row.id))), name: username, displayName: username },
+  });
+}
+
+async function signupFinish(request, env, ip, url) {
+  const peek = await request.clone().json().catch(() => null);
+  const uid = Number(peek && peek.user_id);
+  if (!Number.isInteger(uid) || uid < 1) throw new HttpError(400, 'Gecersiz kayit');
+  const pending = await env.DB.prepare(
+    "SELECT id FROM users WHERE id = ? AND pending = 1 AND created_at > datetime('now', '-15 minutes')"
+  ).bind(uid).first();
+  if (!pending) throw new HttpError(400, 'Kayit suresi doldu, lutfen tekrar deneyin');
+  await passkeyRegisterVerify(request, env, url, uid);
+  await env.DB.prepare('UPDATE users SET pending = 0 WHERE id = ?').bind(uid).run();
+  await recordFootprint(env, request, ip, 'signup', true, peek.fp);
+  return json({ ok: true }, 200, { 'Set-Cookie': await passkeySessionCookie(request, env, uid) });
+}
+
 function unb64(s) {
   return Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 }
@@ -1269,7 +1359,7 @@ async function passkeyRegisterOptions(env, url) {
   });
 }
 
-async function passkeyRegisterVerify(request, env, url) {
+async function passkeyRegisterVerify(request, env, url, uid = 1) {
   const body = await readJson(request);
   const bad = () => new HttpError(400, 'Parmak izi kaydedilemedi');
   let cd;
@@ -1292,11 +1382,11 @@ async function passkeyRegisterVerify(request, env, url) {
   if (parsed.cred.kty !== 2 || parsed.cred.alg !== -7 || parsed.cred.crv !== 1) throw bad();
   if (parsed.cred.id !== String(body.id || '')) throw bad();
 
-  const count = await env.DB.prepare('SELECT COUNT(*) AS n FROM webauthn_credentials').first();
+  const count = await env.DB.prepare('SELECT COUNT(*) AS n FROM webauthn_credentials WHERE user_id = ?').bind(uid).first();
   if (count && count.n >= PASSKEY_MAX) throw new HttpError(409, 'Parmak izi sinirina ulasildi');
   await env.DB.prepare(
-    'INSERT INTO webauthn_credentials (id, x, y, sign_count) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING'
-  ).bind(parsed.cred.id, parsed.cred.x, parsed.cred.y, parsed.signCount).run();
+    'INSERT INTO webauthn_credentials (id, x, y, sign_count, user_id) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING'
+  ).bind(parsed.cred.id, parsed.cred.x, parsed.cred.y, parsed.signCount, uid).run();
   return json({ ok: true });
 }
 
@@ -1357,11 +1447,13 @@ async function passkeyLogin(request, env, ip, url) {
     await recordFootprint(env, request, ip, 'login_bot', false, body.fp);
     throw new HttpError(403, 'Dogrulama basarisiz. Lutfen tekrar deneyin.');
   }
-  const pwOk = await requirePassword(env, body);
-  const ok = pwOk && (await verifyAssertion(env, body.assertion, url));
+  const user = await userForLogin(env, body);
+  const pwOk = !!user;
+  const assertOk = pwOk && (await verifyAssertion(env, body.assertion, url));
+  const ok = assertOk && (await credentialOwner(env, body.assertion)) === user.id;
   await recordFootprint(env, request, ip, 'login', ok, body.fp);
   if (!ok) throw new HttpError(401, pwOk ? 'Parmak izi dogrulanamadi' : 'Kullanici adi veya sifre hatali');
-  return json({ ok: true }, 200, { 'Set-Cookie': await passkeySessionCookie(request, env) });
+  return json({ ok: true }, 200, { 'Set-Cookie': await passkeySessionCookie(request, env, user.id) });
 }
 
 async function passkeyList(env) {
