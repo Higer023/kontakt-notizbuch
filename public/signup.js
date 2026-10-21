@@ -126,7 +126,8 @@
     const codeHash = await sha256Hex(window.RecoveryCrypto.normalize(code));
 
     $('#su-error').textContent = '';
-    await showRecoveryCode(code);
+    // Kod ekranda gosterilmez; yalnizca e-posta adresine gonderilir
+    $('#su-error').textContent = 'Kurtarma kodu e-posta adresinize gonderiliyor...';
 
     await post('/api/signup/finish', {
       user_id: start.user_id,
