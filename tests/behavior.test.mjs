@@ -166,4 +166,39 @@ await test('ice aktarma baska kullanicinin ayni kimlikli kaydini ezmez', async (
   assert.ok(JSON.stringify(await r2.json()).includes('a2FsbWFsaQ=='), 'kullanici 2 kaydi ezildi');
 });
 
+
+// ---------- Yetki denetimi: herkese acik olmayan her /api yolu oturumsuz 401 donmeli ----------
+import { readFileSync as rfs } from 'node:fs';
+const workerSrc = rfs(new URL('../src/worker.js', import.meta.url), 'utf8');
+const PUBLIC_ROUTES = new Set([
+  '/api/login', '/api/logout', '/api/signup/start', '/api/signup/finish',
+  '/api/recovery/user', '/api/recovery/login', '/api/recovery/send',
+  '/api/passkey/login/options', '/api/passkey/login/verify',
+]);
+const found = [...workerSrc.matchAll(/pathname === '(\/api\/[^']+)' && method === '(GET|POST|PUT|DELETE)'/g)]
+  .map((m) => [m[1], m[2]]);
+const unique = [...new Map(found.map(([p, m]) => [p + ' ' + m, [p, m]])).values()];
+const probes = [...unique, ['/api/vault/contacts/1', 'PUT'], ['/api/vault/contacts/1', 'DELETE']];
+
+await test('yetki denetimi: korunan her /api yolu oturumsuz 401 doner (' + unique.length + ' yol)', async () => {
+  assert.ok(unique.length >= 20, `beklenenden az yol bulundu: ${unique.length}`);
+  const failures = [];
+  const { db: auditDb, DB: auditDB } = makeDb();
+  auditDb.exec(schema);
+  seedUsers(auditDb);
+  for (const [path, method] of probes) {
+    if (PUBLIC_ROUTES.has(path)) continue;
+    const res = await worker.fetch(new Request('https://example.test' + path, {
+      method, headers: { 'content-type': 'application/json', origin: 'https://example.test' },
+      body: method === 'GET' ? undefined : '{}',
+    }), envFor(auditDB));
+    if (res.status !== 401) failures.push(`${method} ${path} -> ${res.status}`);
+  }
+  assert.deepEqual(failures, [], 'oturumsuz erisilebilen yollar');
+});
+
+await test('herkese acik yollar tanimli (giris/kurtarma/kayit)', async () => {
+  for (const p of PUBLIC_ROUTES) assert.ok(workerSrc.includes("'" + p + "'"), `yol bulunamadi: ${p}`);
+});
+
 console.log(`\n${passed} test gecti`);
