@@ -1,4 +1,4 @@
-// Hesap olusturma: kullanici adi + parola + parmak izi. Her hesabin kendi kasasi olur.
+// Hesap olusturma ve kurtarma: kullanici adi + parola + parmak izi + kurtarma kodu.
 (function () {
   const $ = (sel) => document.querySelector(sel);
   let turnstileToken = '';
@@ -17,6 +17,11 @@
     return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
 
+  async function sha256Hex(text) {
+    const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return Array.from(new Uint8Array(d)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+
   async function post(path, body) {
     const res = await fetch(path, {
       method: 'POST',
@@ -29,26 +34,58 @@
     return data;
   }
 
-  function buildDialog() {
-    const dlg = document.createElement('dialog');
-    dlg.id = 'signup-dialog';
-    dlg.className = 'sheet';
-    dlg.innerHTML = `
-      <form id="signup-form" class="sheet-body form">
-        <div class="sheet-grip"></div>
-        <h2>Hesap olustur</h2>
-        <p class="muted">Her hesabin kendine ozel rehberi olur. Parola ve parmak iziniz gerekir.</p>
-        <input id="su-username" placeholder="Kullanici adi (3-30 karakter)" autocomplete="username" required maxlength="30">
-        <input id="su-password" type="password" placeholder="Parola (en az 10 karakter)" autocomplete="new-password" required minlength="10">
-        <input id="su-password2" type="password" placeholder="Parola tekrar" autocomplete="new-password" required minlength="10">
-        <p id="su-error" class="error" role="alert"></p>
-        <div class="form-actions">
-          <button type="button" id="su-cancel" class="btn-ghost">Vazgec</button>
-          <button type="submit" class="btn-primary">Parmak izi ile olustur</button>
-        </div>
-      </form>`;
+  function el(tag, attrs, text) {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) n.setAttribute(k, v);
+    if (text !== undefined) n.textContent = text;
+    return n;
+  }
+
+  // ---------- Kayit penceresi ----------
+
+  function buildSignupDialog() {
+    const dlg = el('dialog', { id: 'signup-dialog', class: 'sheet' });
+    const form = el('form', { id: 'signup-form', class: 'sheet-body form' });
+    form.appendChild(el('div', { class: 'sheet-grip' }));
+    form.appendChild(el('h2', {}, 'Hesap olustur'));
+    form.appendChild(el('p', { class: 'muted' }, 'Her hesabin kendine ozel rehberi olur. Parola, parmak izi ve kurtarma kodu gerekir.'));
+    form.appendChild(el('input', { id: 'su-username', placeholder: 'Kullanici adi (3-30 karakter)', autocomplete: 'username', required: '', maxlength: '30' }));
+    form.appendChild(el('input', { id: 'su-password', type: 'password', placeholder: 'Parola (en az 10 karakter)', autocomplete: 'new-password', required: '', minlength: '10' }));
+    form.appendChild(el('input', { id: 'su-password2', type: 'password', placeholder: 'Parola tekrar', autocomplete: 'new-password', required: '', minlength: '10' }));
+    form.appendChild(el('p', { id: 'su-error', class: 'error', role: 'alert' }));
+    const actions = el('div', { class: 'form-actions' });
+    actions.appendChild(el('button', { type: 'button', id: 'su-cancel', class: 'btn-ghost' }, 'Vazgec'));
+    actions.appendChild(el('button', { type: 'submit', class: 'btn-primary' }, 'Parmak izi ile olustur'));
+    form.appendChild(actions);
+    dlg.appendChild(form);
     document.body.appendChild(dlg);
     return dlg;
+  }
+
+  // Kurtarma kodu bir kez gosterilir; kullanici onaylayana kadar kayit tamamlanmaz
+  function showRecoveryCode(code) {
+    return new Promise((resolve, reject) => {
+      const dlg = el('dialog', { id: 'rc-show-dialog', class: 'sheet' });
+      const body = el('div', { class: 'sheet-body form' });
+      body.appendChild(el('div', { class: 'sheet-grip' }));
+      body.appendChild(el('h2', {}, 'Kurtarma kodunuz'));
+      body.appendChild(el('p', { class: 'muted' }, 'Parolanizi unutursaniz bu kodla hesabiniza girebilirsiniz. Kodu guvenli bir yere kaydedin. Bu kod bir daha gosterilmez.'));
+      body.appendChild(el('code', { class: 'recovery-code' }, code));
+      const actions = el('div', { class: 'form-actions' });
+      const copy = el('button', { type: 'button', class: 'btn-ghost' }, 'Kopyala');
+      const cancel = el('button', { type: 'button', class: 'btn-ghost' }, 'Vazgec');
+      const ok = el('button', { type: 'button', class: 'btn-primary' }, 'Kaydettim, devam et');
+      actions.appendChild(copy); actions.appendChild(cancel); actions.appendChild(ok);
+      body.appendChild(actions);
+      dlg.appendChild(body);
+      document.body.appendChild(dlg);
+
+      copy.addEventListener('click', () => navigator.clipboard?.writeText(code).catch(() => {}));
+      cancel.addEventListener('click', () => { dlg.close(); dlg.remove(); reject(new Error('Kayit iptal edildi.')); });
+      dlg.addEventListener('cancel', (e) => e.preventDefault());
+      ok.addEventListener('click', () => { dlg.close(); dlg.remove(); resolve(); });
+      dlg.showModal();
+    });
   }
 
   async function signup(password) {
@@ -75,68 +112,133 @@
       },
     });
 
+    // Kurtarma kodu: parola kodla sifrelenir; sunucu yalnizca kodun ozetini ve sifreli parolayi tutar
+    const code = window.RecoveryCrypto.newCode();
+    const blob = await window.RecoveryCrypto.wrapPassword(code, password);
+    const codeHash = await sha256Hex(window.RecoveryCrypto.normalize(code));
+
+    $('#su-error').textContent = '';
+    await showRecoveryCode(code);
+
     await post('/api/signup/finish', {
       user_id: start.user_id,
       id: cred.id,
       fp,
+      recovery: { code_hash: codeHash, blob },
       response: {
         clientDataJSON: bufToB64u(cred.response.clientDataJSON),
         attestationObject: bufToB64u(cred.response.attestationObject),
       },
     });
 
-    // Yeni hesabin kendi kasasi acilir (bos rehber)
     await unlockVault(password);
   }
+
+  // ---------- Kurtarma girisi penceresi ----------
+
+  function buildRecoveryDialog() {
+    const dlg = el('dialog', { id: 'rl-dialog', class: 'sheet' });
+    const form = el('form', { id: 'rl-form', class: 'sheet-body form' });
+    form.appendChild(el('div', { class: 'sheet-grip' }));
+    form.appendChild(el('h2', {}, 'Kurtarma kodu ile giris'));
+    form.appendChild(el('p', { class: 'muted' }, 'Kullanici adiniz ve kayit sirasinda aldiginiz kurtarma kodunu girin.'));
+    form.appendChild(el('input', { id: 'rl-username', placeholder: 'Kullanici adi', autocomplete: 'username', required: '' }));
+    form.appendChild(el('input', { id: 'rl-code', placeholder: 'Kurtarma kodu (ABCDE-FGHJK-...)', autocomplete: 'off', spellcheck: 'false', required: '' }));
+    form.appendChild(el('p', { id: 'rl-error', class: 'error', role: 'alert' }));
+    const actions = el('div', { class: 'form-actions' });
+    actions.appendChild(el('button', { type: 'button', id: 'rl-cancel', class: 'btn-ghost' }, 'Vazgec'));
+    actions.appendChild(el('button', { type: 'submit', class: 'btn-primary' }, 'Giris yap'));
+    form.appendChild(actions);
+    dlg.appendChild(form);
+    document.body.appendChild(dlg);
+    return dlg;
+  }
+
+  async function recoveryLogin() {
+    const username = $('#rl-username').value.trim();
+    const code = $('#rl-code').value;
+    const geo = await getGeo();
+    const fp = await getFingerprint(geo);
+    const r = await post('/api/recovery/user', { username, code, fp, turnstile: turnstileToken });
+    let password;
+    try {
+      password = await window.RecoveryCrypto.unwrapPassword(code, r.blob);
+    } catch {
+      throw new Error('Kurtarma kodu hatali.');
+    }
+    await unlockVault(password);
+  }
+
+  // ---------- Baglanti ----------
 
   function bind() {
     const loginForm = $('#login-form');
     if (!loginForm) return;
 
-    const openBtn = document.createElement('button');
-    openBtn.type = 'button';
-    openBtn.id = 'open-signup';
-    openBtn.className = 'btn-ghost';
-    openBtn.textContent = 'Hesabiniz yok mu? Hesap olusturun';
-    loginForm.appendChild(openBtn);
+    const signupDlg = buildSignupDialog();
+    const recDlg = buildRecoveryDialog();
 
-    const dlg = buildDialog();
+    const openSignup = el('button', { type: 'button', id: 'open-signup', class: 'btn-ghost' }, 'Hesabiniz yok mu? Hesap olusturun');
+    const openRec = el('button', { type: 'button', id: 'open-recovery', class: 'btn-ghost' }, 'Parolamu unuttum (kurtarma kodu)');
+    loginForm.appendChild(openSignup);
+    loginForm.appendChild(openRec);
 
-    openBtn.addEventListener('click', () => {
+    function requireTurnstile() {
       turnstileToken = window.turnstile ? window.turnstile.getResponse() : '';
       if (!turnstileToken) {
-        $('#login-error').textContent = 'Once dogrulamayi tamamlayin, sonra hesap olusturun.';
-        return;
+        $('#login-error').textContent = 'Once dogrulamayi tamamlayin.';
+        return false;
       }
       $('#login-error').textContent = '';
+      return true;
+    }
+
+    openSignup.addEventListener('click', () => {
+      if (!requireTurnstile()) return;
       $('#su-error').textContent = '';
-      dlg.showModal();
+      signupDlg.showModal();
       $('#su-username').focus();
     });
 
-    $('#su-cancel').addEventListener('click', () => dlg.close());
+    openRec.addEventListener('click', () => {
+      if (!requireTurnstile()) return;
+      $('#rl-error').textContent = '';
+      recDlg.showModal();
+      $('#rl-username').focus();
+    });
+
+    $('#su-cancel').addEventListener('click', () => signupDlg.close());
+    $('#rl-cancel').addEventListener('click', () => recDlg.close());
 
     $('#signup-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const password = $('#su-password').value;
-      if (password !== $('#su-password2').value) {
-        $('#su-error').textContent = 'Parolalar eslesmiyor.';
-        return;
-      }
-      if (password.length < 10) {
-        $('#su-error').textContent = 'Parola en az 10 karakter olmali.';
-        return;
-      }
+      if (password !== $('#su-password2').value) { $('#su-error').textContent = 'Parolalar eslesmiyor.'; return; }
+      if (password.length < 10) { $('#su-error').textContent = 'Parola en az 10 karakter olmali.'; return; }
       try {
         await signup(password);
         turnstileToken = '';
         window.turnstile?.reset();
         $('#su-password').value = '';
         $('#su-password2').value = '';
-        dlg.close();
+        signupDlg.close();
         showApp();
       } catch (err) {
         $('#su-error').textContent = err.message;
+      }
+    });
+
+    $('#rl-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await recoveryLogin();
+        turnstileToken = '';
+        window.turnstile?.reset();
+        $('#rl-code').value = '';
+        recDlg.close();
+        showApp();
+      } catch (err) {
+        $('#rl-error').textContent = err.message;
       }
     });
   }
