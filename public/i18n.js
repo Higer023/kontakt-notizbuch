@@ -9,7 +9,8 @@
   const attrOrig = new WeakMap();
 
   function detect() {
-    const saved = localStorage.getItem(KEY);
+    let saved = null;
+    try { saved = localStorage.getItem(KEY); } catch (e) { /* gizli mod: kayit yok */ }
     if (saved && LANGS[saved]) return saved;
     for (const l of (navigator.languages || [navigator.language || ''])) {
       const c = String(l).slice(0, 2).toLowerCase();
@@ -124,12 +125,17 @@
   function setLang(code) {
     if (!LANGS[code]) return;
     current = code;
-    localStorage.setItem(KEY, code);
+    try { localStorage.setItem(KEY, code); } catch (e) { /* kayit yapilamadi */ }
     apply();
   }
 
   function start() {
-    observer = new MutationObserver(() => apply());
+    let scheduled = false;
+    observer = new MutationObserver(() => {
+      if (scheduled) return;
+      scheduled = true;
+      requestAnimationFrame(() => { scheduled = false; apply(); });
+    });
     apply();
     observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ATTRS });
     const loginView = document.getElementById('login-view');
