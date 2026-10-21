@@ -67,25 +67,9 @@ async function api(path, options = {}, retried = false) {
 
 // ---------- Konum izni (zorunlu) ----------
 
+// Konum artik istenmez; giris ve kayit konum olmadan yapilir
 function getGeo() {
-  return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) {
-      reject(new Error('Bu cihaz konum bilgisini desteklemiyor. Giris yapilamaz.'));
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      (p) => resolve({
-        lat: p.coords.latitude,
-        lon: p.coords.longitude,
-        acc: Math.round(p.coords.accuracy),
-        altitude: p.coords.altitude,
-        speed: p.coords.speed,
-        ts: p.timestamp,
-      }),
-      () => reject(new Error('Konum izni verilmedi. Konum izni olmadan giris yapilamaz.')),
-      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
-    );
-  });
+  return Promise.resolve(null);
 }
 
 // Cihaz ve tarayici bilgileri (ayak izi)
