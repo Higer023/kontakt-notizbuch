@@ -77,6 +77,8 @@ await test('oturumsuz bilinmeyen api yolu 401 doner (yol kesfi engellenir)', asy
 });
 
 
+
+
 // ---------- Oturumlu istekler: yardimcilar ----------
 import { createHash } from 'node:crypto';
 const sha256hex = (t) => createHash('sha256').update(t).digest('hex');
@@ -97,6 +99,20 @@ const authReq = (method, path, token, body) => new Request('https://example.test
 });
 const envFor = (DB) => ({ DB, LOG_KEY: TEST_LOG_KEY, TURNSTILE_SECRET: 'test', ASSETS: { fetch: async () => new Response('a') } });
 const U1 = 'tok-user1-aaaaaaaa', U2 = 'tok-user2-bbbbbbbb';
+
+await test('push kuyrugu ve abonelik islemleri yonetici olmayan kullaniciya kapali', async () => {
+  const { db, DB } = makeDb(); db.exec(schema); seedUsers(db);
+  for (const [method, path, body] of [
+    ['GET', '/api/push/pending', undefined],
+    ['POST', '/api/push/queue', { type: 'birthday', count: 1 }],
+    ['POST', '/api/push/subscribe', { endpoint: 'https://push.example.test/endpoint-12345', keys: { p256dh: 'abcdefghijklmnopqrstuvwx', auth: 'abcdefghijklm' } }],
+    ['POST', '/api/push/test', {}],
+    ['POST', '/api/push/consume', {}],
+  ]) {
+    const res = await worker.fetch(authReq(method, path, U2, body), envFor(DB));
+    assert.equal(res.status, 403, `${method} ${path}: beklenen 403, gelen ${res.status}`);
+  }
+});
 
 await test('sifreli kayit yaz-oku dongusu: sunucu ayni sifreli veriyi geri verir', async () => {
   const { db, DB } = makeDb(); db.exec(schema); seedUsers(db);

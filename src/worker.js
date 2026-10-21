@@ -79,7 +79,7 @@ function clientIp(request) {
   return request.headers.get('CF-Connecting-IP') || 'unknown';
 }
 
-const ADMIN_ONLY = /^\/api\/(logs|sessions|security|blocks|recovery\/rotate|vault\/(legacy|import))/;
+const ADMIN_ONLY = /^\/api\/(logs|sessions|security|blocks|recovery\/rotate|vault\/(legacy|import)|push\/(subscribe|unsubscribe|test|queue|pending|consume))/;
 
 async function handleApi(request, env, url) {
   const { pathname } = url;
