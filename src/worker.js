@@ -420,9 +420,23 @@ function footprintJson(request, clientFp) {
   return JSON.stringify({ client, server }).slice(0, 7000);
 }
 
+// Veri azaltma: ham parmak izi saklanmaz, yalnizca cihaz ve tarayici ozeti tutulur. Kayitlar 90 gun sonra silinir.
+const LOG_RETENTION_DAYS = 90;
+function deviceSummary(ua) {
+  const u = String(ua || '');
+  const device = /iPhone|iPad/.test(u) ? 'iOS' : /Android/.test(u) ? 'Android' : /Windows/.test(u) ? 'Windows'
+    : /Mac OS X|Macintosh/.test(u) ? 'Mac' : /Linux/.test(u) ? 'Linux' : 'Bilinmeyen';
+  const browser = /Edg\//.test(u) ? 'Edge' : /Chrome\//.test(u) ? 'Chrome' : /Firefox\//.test(u) ? 'Firefox'
+    : /Safari\//.test(u) ? 'Safari' : 'Diger';
+  return { device, browser };
+}
 async function recordFootprint(env, request, ip, event, success, clientFp) {
-  const ua = (request.headers.get('User-Agent') || '').slice(0, 300);
-  const sealed = await sealLog(env, { ip, user_agent: ua, fingerprint: parseJsonSafe(footprintJson(request, clientFp)) });
+  // clientFp bilerek kullanilmaz: istemciden gelen ham parmak izi artik kaydedilmez.
+  const fullUa = (request.headers.get('User-Agent') || '').slice(0, 300);
+  // Ozet tam UA'dan cikarilir (tarayici adi sonda olabilir); saklanan metin kisaltilir.
+  const sealed = await sealLog(env, { ip, user_agent: fullUa.slice(0, 120), fingerprint: deviceSummary(fullUa) });
+  await env.DB.prepare("DELETE FROM login_logs_v2 WHERE created_at < datetime('now', ?)")
+    .bind(`-${LOG_RETENTION_DAYS} days`).run();
   await env.DB.prepare(
     'INSERT INTO login_logs_v2 (idx, success, event, sealed) VALUES (?, ?, ?, ?)'
   ).bind(await ipIndex(env, ip), success ? 1 : 0, event, sealed).run();
