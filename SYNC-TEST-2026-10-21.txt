@@ -1,0 +1,2 @@
+Temporary, harmless test file to verify whether commits on Higer23/kontakt-notizbuch are automatically synchronized to Higer023/kontakt-notizbuch.
+Test date: 2026-10-21
