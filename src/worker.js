@@ -527,9 +527,9 @@ async function requireSession(request, env) {
   const row = await env.DB.prepare(
     "SELECT s.token_hash, s.user_id, u.is_admin, (s.reauth_until IS NOT NULL AND s.reauth_until > datetime('now')) AS fresh FROM sessions s LEFT JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > datetime('now')"
   ).bind(await sha256(token)).first();
-  if (!row) return null;
-  const uid = row.user_id == null ? 1 : row.user_id;
-  return { token_hash: row.token_hash, user_id: uid, is_admin: row.user_id == null ? true : !!row.is_admin, fresh: !!row.fresh };
+  // Kullanicisi olmayan (eski) oturum kabul edilmez. Eskiden bu oturumlar otomatik yonetici sayiliyordu.
+  if (!row || row.user_id == null) return null;
+  return { token_hash: row.token_hash, user_id: row.user_id, is_admin: !!row.is_admin, fresh: !!row.fresh };
 }
 
 function parseJsonSafe(text) {
