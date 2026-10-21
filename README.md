@@ -1,5 +1,7 @@
 # Kisisel Iletisim Rehberi ve Not Defteri
 
+[![Lisans: MIT](https://img.shields.io/badge/Lisans-MIT-yellow.svg)](LICENSE)
+
 Cloudflare Workers (API + statik dosyalar), D1 (SQL) ve R2 (fotograflar) uzerinde calisan, tek yoneticili, karanlik temali kisi rehberi.
 
 ## Ozellikler
@@ -54,3 +56,9 @@ npx wrangler dev --remote
 - Cloudflare Access (Zero Trust) ile uygulamanin onune e-posta/OTP katmani koymaniz onerilir.
 - Fotograflar R2 URL'si ile degil yalnizca `/api/photos/:id` uzerinden, oturum kontrolu ile sunulur.
 - Kisisel veri icerdiginden D1 yedeklerini (`wrangler d1 export`) duzenli alin.
+
+## Lisans
+Bu proje [MIT Lisansi](LICENSE) ile sunulur. Kodu kullanabilir, degistirebilir ve dagitabilirsiniz; telif ve lisans metnini korumaniz yeterlidir.
+
+## Destek / Sponsorluk
+Projeyi [Open Collective](https://opencollective.com/kontakt-notizbuch) uzerinden destekleyebilirsiniz. Destek, MIT lisansini degistirmez: proje herkes icin MIT olarak kalir.
