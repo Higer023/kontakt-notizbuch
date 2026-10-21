@@ -262,4 +262,24 @@ await test('WebAuthn challenge tek SQL islemiyle yalnizca bir kez tuketilir', as
   assert.ok(stillThere, 'baska amaca ait challenge silindi');
 });
 
+await test('Passkey listesi ve silme islemi yalnizca oturum sahibini kapsar', async () => {
+  const { db, DB } = makeDb(); db.exec(schema); seedUsers(db);
+  db.exec("INSERT INTO webauthn_credentials (id, x, y, sign_count, user_id) VALUES ('cred-user1', 'x1', 'y1', 0, 1), ('cred-user2', 'x2', 'y2', 0, 2)");
+  const list1 = await worker.fetch(authReq('GET', '/api/passkey/list', U1), envFor(DB));
+  const list2 = await worker.fetch(authReq('GET', '/api/passkey/list', U2), envFor(DB));
+  assert.equal(list1.status, 200, `user1 listesi: ${list1.status}`);
+  assert.equal(list2.status, 200, `user2 listesi: ${list2.status}`);
+  assert.deepEqual((await list1.json()).items.map((x) => x.id), ['cred-user1']);
+  assert.deepEqual((await list2.json()).items.map((x) => x.id), ['cred-user2']);
+
+  db.prepare("UPDATE sessions SET reauth_until = datetime('now', '+5 minutes') WHERE token_hash = ?").bind(sha256hex(U1)).run();
+  const crossDelete = await worker.fetch(authReq('POST', '/api/passkey/delete', U1, { id: 'cred-user2' }), envFor(DB));
+  assert.equal(crossDelete.status, 200, `silme endpointi: ${crossDelete.status}`);
+  assert.ok(await DB.prepare("SELECT id FROM webauthn_credentials WHERE id = 'cred-user2' AND user_id = 2").first(), 'user1, user2 passkey kaydini sildi');
+
+  const ownDelete = await worker.fetch(authReq('POST', '/api/passkey/delete', U1, { id: 'cred-user1' }), envFor(DB));
+  assert.equal(ownDelete.status, 200, `kendi passkey silinemedi: ${ownDelete.status}`);
+  assert.equal(await DB.prepare("SELECT id FROM webauthn_credentials WHERE id = 'cred-user1'").first(), null, 'kendi passkey kaydi silinmedi');
+});
+
 console.log(`\n${passed} test gecti`);

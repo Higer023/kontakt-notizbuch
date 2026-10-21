@@ -79,7 +79,7 @@ function clientIp(request) {
   return request.headers.get('CF-Connecting-IP') || 'unknown';
 }
 
-const ADMIN_ONLY = /^\/api\/(logs|sessions|security|blocks|recovery\/rotate|passkey\/(register|delete|list)|vault\/(legacy|import))/;
+const ADMIN_ONLY = /^\/api\/(logs|sessions|security|blocks|recovery\/rotate|vault\/(legacy|import))/;
 
 async function handleApi(request, env, url) {
   const { pathname } = url;
@@ -117,10 +117,10 @@ async function handleApi(request, env, url) {
   if (ADMIN_ONLY.test(pathname) && !session.is_admin) throw new HttpError(403, 'Yonetici yetkisi gerekli');
   if (pathname === '/api/reauth' && method === 'POST') return reauth(request, env, ip, session);
   if (pathname === '/api/me' && method === 'GET') return json({ ok: true });
-  if (pathname === '/api/passkey/register/options' && method === 'POST') { requireFresh(); return passkeyRegisterOptions(env, url); }
+  if (pathname === '/api/passkey/register/options' && method === 'POST') { requireFresh(); return passkeyRegisterOptions(env, url, session.user_id); }
   if (pathname === '/api/passkey/register/verify' && method === 'POST') { requireFresh(); return passkeyRegisterVerify(request, env, url, session.user_id); }
-  if (pathname === '/api/passkey/list' && method === 'GET') return passkeyList(env);
-  if (pathname === '/api/passkey/delete' && method === 'POST') { requireFresh(); return passkeyDelete(request, env); }
+  if (pathname === '/api/passkey/list' && method === 'GET') return passkeyList(env, session.user_id);
+  if (pathname === '/api/passkey/delete' && method === 'POST') { requireFresh(); return passkeyDelete(request, env, session.user_id); }
   if (pathname === '/api/recovery/rotate' && method === 'POST') { requireFresh(); return recoveryRotate(request, env); }
   if (pathname === '/api/user/recovery/rotate' && method === 'POST') { requireFresh(); return userRecoveryRotate(request, env, session); }
   if (pathname.startsWith('/api/push/')) return handlePush(request, env, url, { readJson, json, HttpError });
@@ -1410,9 +1410,9 @@ async function passkeyLoginOptions(env, url) {
   return json({ challenge, rpId: url.hostname, userVerification: 'required', timeout: 60000 });
 }
 
-async function passkeyRegisterOptions(env, url) {
+async function passkeyRegisterOptions(env, url, uid = 1) {
   const challenge = await newChallenge(env, 'register');
-  const rows = await env.DB.prepare('SELECT id FROM webauthn_credentials').all();
+  const rows = await env.DB.prepare('SELECT id FROM webauthn_credentials WHERE user_id = ?').bind(uid).all();
   return json({
     challenge,
     rp: { id: url.hostname, name: 'Rehber' },
@@ -1518,16 +1518,16 @@ async function passkeyLogin(request, env, ip, url) {
   return json({ ok: true }, 200, { 'Set-Cookie': await passkeySessionCookie(request, env, user.id) });
 }
 
-async function passkeyList(env) {
-  const rows = await env.DB.prepare('SELECT id, created_at FROM webauthn_credentials ORDER BY created_at').all();
+async function passkeyList(env, userId) {
+  const rows = await env.DB.prepare('SELECT id, created_at FROM webauthn_credentials WHERE user_id = ? ORDER BY created_at').bind(userId).all();
   return json({ items: rows.results || [] });
 }
 
-async function passkeyDelete(request, env) {
+async function passkeyDelete(request, env, userId) {
   const body = await readJson(request);
   const id = String(body.id || '');
   if (!id) throw new HttpError(400, 'Gecersiz istek');
-  await env.DB.prepare('DELETE FROM webauthn_credentials WHERE id = ?').bind(id).run();
+  await env.DB.prepare('DELETE FROM webauthn_credentials WHERE id = ? AND user_id = ?').bind(id, userId).run();
   return json({ ok: true });
 }
 
