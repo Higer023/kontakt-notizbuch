@@ -1397,10 +1397,11 @@ async function newChallenge(env, purpose) {
 
 // Tek kullanimlik: bulunsa da bulunmasa da silinir
 async function consumeChallenge(env, purpose, challenge) {
+  // Tek SQL DELETE ... RETURNING: ayni challenge icin eszamanli isteklerden
+  // yalnizca biri kaydi silebilir ve basarili tuketim sonucunu alabilir.
   const row = await env.DB.prepare(
-    "SELECT challenge FROM webauthn_challenges WHERE challenge = ? AND purpose = ? AND created_at > datetime('now', ?)"
+    "DELETE FROM webauthn_challenges WHERE challenge = ? AND purpose = ? AND created_at > datetime('now', ?) RETURNING challenge"
   ).bind(String(challenge || ''), purpose, `-${CHALLENGE_MINUTES} minutes`).first();
-  await env.DB.prepare('DELETE FROM webauthn_challenges WHERE challenge = ?').bind(String(challenge || '')).run();
   return !!row;
 }
 

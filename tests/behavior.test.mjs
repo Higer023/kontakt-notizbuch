@@ -247,4 +247,19 @@ await test('gunluk cron 90 gunu asan giris kayitlarini siler; sinir icindeki kay
   assert.ok(!remaining.includes('idx-91'), '91 gunluk kayit silinmedi');
 });
 
+await test('WebAuthn challenge tek SQL islemiyle yalnizca bir kez tuketilir', async () => {
+  const { db, DB } = makeDb(); db.exec(schema);
+  db.exec("INSERT INTO webauthn_challenges (challenge, purpose, created_at) VALUES ('challenge-once', 'login', datetime('now'))");
+  const consume = () => DB.prepare("DELETE FROM webauthn_challenges WHERE challenge = ? AND purpose = ? AND created_at > datetime('now', '-5 minutes') RETURNING challenge").bind('challenge-once', 'login').first();
+  const first = await consume();
+  const second = await consume();
+  assert.equal(first.challenge, 'challenge-once', 'ilk challenge tuketimi basarisiz');
+  assert.equal(second, null, 'ayni challenge ikinci kez tuketilebildi');
+  db.exec("INSERT INTO webauthn_challenges (challenge, purpose, created_at) VALUES ('wrong-purpose', 'register', datetime('now'))");
+  const wrongPurpose = await DB.prepare("DELETE FROM webauthn_challenges WHERE challenge = ? AND purpose = ? AND created_at > datetime('now', '-5 minutes') RETURNING challenge").bind('wrong-purpose', 'login').first();
+  assert.equal(wrongPurpose, null, 'baska amaca ait challenge tuketildi');
+  const stillThere = await DB.prepare("SELECT challenge FROM webauthn_challenges WHERE challenge = 'wrong-purpose'").first();
+  assert.ok(stillThere, 'baska amaca ait challenge silindi');
+});
+
 console.log(`\n${passed} test gecti`);
