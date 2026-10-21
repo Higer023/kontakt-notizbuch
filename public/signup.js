@@ -264,6 +264,56 @@
     });
   }
 
+  // Ayarlar penceresinde: yeni kurtarma kodu (parola + e-posta)
+  function initSettingsRecovery() {
+    const sd = document.getElementById('settings-dialog');
+    if (!sd) return;
+    const dlg = el('dialog', { id: 'rot-dialog', class: 'sheet' });
+    const form = el('form', { id: 'rot-form', class: 'sheet-body form' });
+    form.appendChild(el('div', { class: 'sheet-grip' }));
+    form.appendChild(el('h2', {}, 'Yeni kurtarma kodu gonder'));
+    form.appendChild(el('p', { class: 'muted' }, 'Eski kurtarma kodu gecersiz olur. Yeni kod e-posta adresinize gonderilir.'));
+    form.appendChild(el('input', { id: 'rot-email', type: 'email', placeholder: 'E-posta (kurtarma kodu gonderilecek)', autocomplete: 'email', required: '', maxlength: '254' }));
+    form.appendChild(el('input', { id: 'rot-password', type: 'password', placeholder: 'Parola', autocomplete: 'current-password', required: '' }));
+    form.appendChild(el('p', { id: 'rot-error', class: 'error', role: 'alert' }));
+    const actions = el('div', { class: 'form-actions' });
+    actions.appendChild(el('button', { type: 'button', id: 'rot-cancel', class: 'btn-ghost' }, 'Vazgec'));
+    actions.appendChild(el('button', { type: 'submit', class: 'btn-primary' }, 'Onayla'));
+    form.appendChild(actions);
+    dlg.appendChild(form);
+    document.body.appendChild(dlg);
+
+    $('#rot-cancel').addEventListener('click', () => dlg.close());
+    dlg.addEventListener('close', () => { $('#rot-password').value = ''; $('#rot-error').textContent = ''; });
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        const password = $('#rot-password').value;
+        const email = $('#rot-email').value.trim();
+        const geo = await getGeo();
+        const fp = await getFingerprint(geo);
+        await post('/api/reauth', { password, fp });
+        const code = window.RecoveryCrypto.newCode();
+        const blob = await window.RecoveryCrypto.wrapPassword(code, password);
+        await post('/api/user/recovery/rotate', { email, code: window.RecoveryCrypto.normalize(code), blob });
+        dlg.close();
+        alert('Yeni kurtarma kodu e-posta adresinize gonderildi. Eski kod artik gecersiz.');
+      } catch (err) {
+        $('#rot-error').textContent = friendly(err);
+      }
+    });
+
+    const inject = () => {
+      if (sd.querySelector('#rot-open')) return;
+      const body = sd.querySelector('.sheet-body') || sd;
+      const btn = el('button', { type: 'button', id: 'rot-open', class: 'pill glass small' }, 'Yeni kurtarma kodu gonder');
+      btn.addEventListener('click', () => { $('#rot-error').textContent = ''; dlg.showModal(); });
+      body.appendChild(btn);
+    };
+    new MutationObserver(() => { if (sd.open) inject(); }).observe(sd, { attributes: true, attributeFilter: ['open'] });
+  }
+  initSettingsRecovery();
+
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind);
   else bind();
 })();
