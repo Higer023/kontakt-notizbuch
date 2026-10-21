@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+const app = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+const start = app.indexOf('function csvCell(value) {');
+const end = app.indexOf('function exportCsv()', start);
+assert.ok(start >= 0 && end > start, 'csvCell helper must exist before exportCsv');
+const context = {};
+vm.runInNewContext(app.slice(start, end) + '\nglobalThis.csvCell = csvCell;', context);
+const csvCell = context.csvCell;
+assert.equal(csvCell('=1+1'), "'=1+1");
+assert.equal(csvCell('+SUM(A1:A2)'), "'+SUM(A1:A2)");
+assert.equal(csvCell('-10+cmd'), "'-10+cmd");
+assert.equal(csvCell('@SUM(A1)'), "'@SUM(A1)");
+assert.equal(csvCell('  =1+1'), "'  =1+1");
+assert.equal(csvCell('normal, value'), '\"normal, value\"');
+assert.equal(csvCell(''), '');
+console.log('CSV formula injection regression tests passed');

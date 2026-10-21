@@ -24,6 +24,8 @@ jobs:
         run: node tests/behavior.test.mjs
       - name: Istemci sifreleme regresyon testleri
         run: node tests/crypto.test.mjs
+      - name: CSV formula injection regression tests
+        run: node tests/csv.test.mjs
 
   deploy:
     needs: test
