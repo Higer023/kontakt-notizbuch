@@ -36,8 +36,7 @@ jobs:
             echo
             echo "The failed result is preserved. No checks were skipped and no branch protections were bypassed."
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Notify Discord if webhook is configured
-        if: ${{ secrets.DISCORD_WEBHOOK_URL != '' }}
+      - name: Notify Discord when webhook is configured
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           RUN_NAME: ${{ github.event.workflow_run.name }}
@@ -47,6 +46,10 @@ jobs:
           CONCLUSION: ${{ github.event.workflow_run.conclusion }}
         run: |
           set -euo pipefail
+          if [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then
+            echo "::warning::DISCORD_WEBHOOK_URL is not configured; failure is recorded in GitHub Actions, but no Discord notification was sent."
+            exit 0
+          fi
           payload=$(jq -n \
             --arg title "GitHub automation failed" \
             --arg workflow "$RUN_NAME" \
@@ -55,10 +58,6 @@ jobs:
             --arg sha "${SHA:0:12}" \
             --arg url "$RUN_URL" \
             '{embeds:[{title:$title,color:15158332,fields:[{name:"Workflow",value:$workflow},{name:"Result",value:$result},{name:"Branch",value:$branch},{name:"Commit",value:$sha}],url:$url}]}')
-          curl --fail --silent --show-error \
-            --retry 2 --retry-delay 1 \
+          curl --fail --silent --show-error --retry 2 --retry-delay 1 \
             -H 'Content-Type: application/json' \
             -d "$payload" "$DISCORD_WEBHOOK_URL" >/dev/null
-      - name: Note missing Discord configuration
-        if: ${{ secrets.DISCORD_WEBHOOK_URL == '' }}
-        run: echo "::warning::DISCORD_WEBHOOK_URL is not configured; the failure is recorded in GitHub Actions but Discord notification was not sent."
