@@ -1425,14 +1425,17 @@ function exportJson() {
   downloadText(JSON.stringify(data, null, 2), `rehber-${stampDate()}.json`, 'application/json');
 }
 function csvCell(value) {
-  const s = value == null ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value);
-  return /[",\r\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  let s = value == null ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value);
+  // Prevent spreadsheet formula execution when exported data is opened in Excel/Sheets.
+  // Prefix formula-leading text (including whitespace/control prefixes) with an apostrophe.
+  if (/^[\u0000-\u0020]*[=+@-]/.test(s)) s = "'" + s;
+  return /[\",\r\n;]/.test(s) ? `\"${s.replace(/\"/g, '\"\"')}\"` : s;
 }
 function exportCsv() {
   if (!contacts.length) { alert('Disa aktarilacak kisi yok.'); return; }
   if (!confirmPlainExport()) return;
   const keys = [...new Set(contacts.flatMap((c) => Object.keys(c)))];
-  const lines = [keys.join(',')].concat(contacts.map((c) => keys.map((k) => csvCell(c[k])).join(',')));
+  const lines = [keys.map(csvCell).join(',')].concat(contacts.map((c) => keys.map((k) => csvCell(c[k])).join(',')));
   downloadText('\ufeff' + lines.join('\r\n'), `rehber-${stampDate()}.csv`, 'text/csv;charset=utf-8');
 }
 $('#export-json').addEventListener('click', exportJson);
