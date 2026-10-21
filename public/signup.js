@@ -57,6 +57,7 @@
     form.appendChild(el('h2', {}, 'Hesap olustur'));
     form.appendChild(el('p', { class: 'muted' }, 'Her hesabin kendine ozel rehberi olur. Parola, parmak izi ve kurtarma kodu gerekir.'));
     form.appendChild(el('input', { id: 'su-username', placeholder: 'Kullanici adi (3-30 karakter)', autocomplete: 'username', required: '', maxlength: '30' }));
+    form.appendChild(el('input', { id: 'su-email', type: 'email', placeholder: 'E-posta (kurtarma kodu gonderilecek)', autocomplete: 'email', required: '', maxlength: '254' }));
     form.appendChild(el('input', { id: 'su-password', type: 'password', placeholder: 'Parola (en az 10 karakter)', autocomplete: 'new-password', required: '', minlength: '10' }));
     form.appendChild(el('input', { id: 'su-password2', type: 'password', placeholder: 'Parola tekrar', autocomplete: 'new-password', required: '', minlength: '10' }));
     form.appendChild(el('p', { id: 'su-error', class: 'error', role: 'alert' }));
@@ -131,6 +132,8 @@
       user_id: start.user_id,
       id: cred.id,
       fp,
+      email: $('#su-email').value.trim(),
+      code: window.RecoveryCrypto.normalize(code),
       recovery: { code_hash: codeHash, blob },
       response: {
         clientDataJSON: bufToB64u(cred.response.clientDataJSON),
