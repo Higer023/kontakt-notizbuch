@@ -211,4 +211,24 @@ await test('kullanicisiz (eski) oturum kabul edilmez, yonetici sayilmaz', async 
   assert.equal(r2.status, 401, `beklenen 401 (loglar), gelen ${r2.status}`);
 });
 
+await test('giris kaydi ham parmak izi icermez, cihaz ozeti tutar', async () => {
+  const { db, DB } = makeDb(); db.exec(schema); seedUsers(db);
+  db.exec("UPDATE users SET is_admin = 1 WHERE id = 1");
+  const ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+  // reauth: kayit yazilir (parmak izi gonderildi), parola yanlis oldugu icin 401
+  const r = await worker.fetch(new Request('https://example.test/api/reauth', {
+    method: 'POST', headers: { cookie: 'session=' + U1, 'content-type': 'application/json', origin: 'https://example.test', 'user-agent': ua },
+    body: JSON.stringify({ fp: { screen: '390x844', tz: 'Europe/Istanbul', canvas: 'SECRET-RAW-FP' } }),
+  }), envFor(DB));
+  // Parola yanlis -> 401; kayit yine de yazildigi icin log testi gecerli.
+  assert.equal(r.status, 401, `beklenen 401, gelen ${r.status}`);
+  db.exec("UPDATE sessions SET reauth_until = datetime('now', '+5 minutes') WHERE user_id = 1");
+  const logs = await worker.fetch(new Request('https://example.test/api/logs', { headers: { cookie: 'session=' + U1 } }), envFor(DB));
+  assert.equal(logs.status, 200, `loglar okunamadi: ${logs.status}`);
+  const text = await logs.text();
+  assert.ok(text.includes('iOS') && text.includes('Safari'), 'cihaz ozeti yok');
+  assert.ok(!text.includes('SECRET-RAW-FP'), 'ham parmak izi kaydedildi');
+  assert.ok(!text.includes('Europe/Istanbul'), 'ham parmak izi kaydedildi (tz)');
+});
+
 console.log(`\n${passed} test gecti`);
