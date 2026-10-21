@@ -272,7 +272,7 @@ await test('Passkey listesi ve silme islemi yalnizca oturum sahibini kapsar', as
   assert.deepEqual((await list1.json()).items.map((x) => x.id), ['cred-user1']);
   assert.deepEqual((await list2.json()).items.map((x) => x.id), ['cred-user2']);
 
-  db.prepare("UPDATE sessions SET reauth_until = datetime('now', '+5 minutes') WHERE token_hash = ?").bind(sha256hex(U1)).run();
+  DB.prepare("UPDATE sessions SET reauth_until = datetime('now', '+5 minutes') WHERE token_hash = ?").bind(sha256hex(U1)).run();
   const crossDelete = await worker.fetch(authReq('POST', '/api/passkey/delete', U1, { id: 'cred-user2' }), envFor(DB));
   assert.equal(crossDelete.status, 200, `silme endpointi: ${crossDelete.status}`);
   assert.ok(await DB.prepare("SELECT id FROM webauthn_credentials WHERE id = 'cred-user2' AND user_id = 2").first(), 'user1, user2 passkey kaydini sildi');
