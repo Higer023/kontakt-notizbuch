@@ -1,0 +1,113 @@
+name: Discord Sync and CI Status Report
+on:
+  workflow_run:
+    workflows:
+      - "Automatic Sync to Higer023"
+      - "Tests"
+      - "Deploy"
+      - "Automation Failure Report"
+    types: [completed]
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+concurrency:
+  group: discord-status-report-${{ github.event.workflow_run.id || github.run_id }}
+  cancel-in-progress: false
+jobs:
+  report:
+    name: Build detailed status report
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Build status, recent success rate, and send Discord embed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_ID: ${{ github.event.workflow_run.id || github.run_id }}
+          RUN_NAME: ${{ github.event.workflow_run.name || 'Manual Discord report test' }}
+          RUN_STATUS: ${{ github.event.workflow_run.conclusion || 'manual_test' }}
+          RUN_URL: ${{ github.event.workflow_run.html_url || format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ACTOR: ${{ github.event.workflow_run.actor.login || github.actor }}
+          EVENT_TYPE: ${{ github.event.workflow_run.event || github.event_name }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${DISCORD_WEBHOOK_URL:-}" ]]; then
+            echo "::error::DISCORD_WEBHOOK_URL secret is missing. Add it in Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          python - <<'PY'
+          import json, os, subprocess, sys, urllib.request, urllib.error, datetime
+          def gh(path):
+              result = subprocess.run(["gh", "api", path], text=True, capture_output=True, check=True, env={**os.environ, "GH_TOKEN": os.environ["GH_TOKEN"]})
+              return json.loads(result.stdout)
+          repo = os.environ["REPO"]
+          current_id = os.environ["RUN_ID"]
+          run_name = os.environ["RUN_NAME"]
+          status = os.environ["RUN_STATUS"]
+          run_url = os.environ["RUN_URL"]
+          branch = os.environ["HEAD_BRANCH"]
+          sha = os.environ["HEAD_SHA"]
+          actor = os.environ["ACTOR"]
+          event_type = os.environ["EVENT_TYPE"]
+          manual = os.environ["EVENT_NAME"] == "workflow_dispatch"
+          try:
+              data = gh(f"repos/{repo}/actions/workflows/sync-to-higer023.yml/runs?per_page=100")
+              runs = data.get("workflow_runs", [])
+              completed = [r for r in runs if r.get("status") == "completed"][:30]
+              success = sum(1 for r in completed if r.get("conclusion") == "success")
+              failed = sum(1 for r in completed if r.get("conclusion") == "failure")
+              other = len(completed) - success - failed
+              rate = round(success * 100 / len(completed), 1) if completed else None
+              rate_text = f"{rate}% ({success}/{len(completed)} successful completed sync runs)" if rate is not None else "Not enough completed sync runs yet"
+          except Exception:
+              completed, success, failed, other, rate = [], 0, 0, 0, None
+              rate_text = "Could not retrieve historical runs"
+          job_lines = []
+          try:
+              jobs = gh(f"repos/{repo}/actions/runs/{current_id}/jobs?per_page=100").get("jobs", [])
+              for job in jobs:
+                  step_bits = [f"{s.get('name','step')}: {s.get('conclusion') or s.get('status') or 'unknown'}" for s in job.get("steps", [])]
+                  line = f"• **{job.get('name','Job')}** — {job.get('conclusion') or job.get('status','unknown')}"
+                  if step_bits: line += "\n  " + " | ".join(step_bits)[:700]
+                  job_lines.append(line[:1000])
+          except Exception:
+              job_lines = ["Job-level details are unavailable for this event."]
+          latest_runs = [f"• [{r.get('name','Sync run')} #{r.get('run_number','?')}]({r.get('html_url','#')}) — {r.get('conclusion','unknown')}" for r in completed[:5]]
+          source_url = f"https://github.com/{repo}"
+          target_url = "https://github.com/Higer023/kontakt-notizbuch"
+          short_sha = sha[:12] if sha else "unknown"
+          stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+          failed_status = status in ("failure", "cancelled", "timed_out", "action_required")
+          color = 15158332 if failed_status else (3066993 if status == "success" else 15844367)
+          title = "🚨 GitHub automation failed" if failed_status else ("🧪 Manual Discord webhook test" if manual else "📡 GitHub automation status")
+          summary = [
+              f"**Workflow:** {run_name}", f"**Result:** `{status}`", f"**Branch:** `{branch}`",
+              f"**Commit:** [`{short_sha}`]({source_url}/commit/{sha})" if sha else "**Commit:** unavailable",
+              f"**Triggered by:** {actor}", f"**Event:** `{event_type}`", f"**Run ID:** `{current_id}`", f"**Report time:** {stamp}",
+              "**Jobs / steps**\n" + "\n".join(job_lines) if job_lines else "",
+              f"**Recent sync success rate:** {rate_text}",
+              f"**Recent sync counts:** {success} successful · {failed} failed · {other} cancelled/other",
+              "**Recent sync runs**\n" + "\n".join(latest_runs) if latest_runs else "",
+              f"**Source repository:** [Open source repo]({source_url})",
+              f"**Target repository:** [Open target repo]({target_url})",
+              f"**Workflow log:** [Open this run]({run_url})",
+              f"**All runs:** [Source Actions]({source_url}/actions) · [Target Actions]({target_url}/actions)",
+              "**Note:** The percentage uses up to the latest 30 completed sync runs; it does not guarantee future success."
+          ]
+          description = "\n".join(x for x in summary if x)[:4000]
+          payload = {"username":"Higer Sync Monitor","allowed_mentions":{"parse":[]},"embeds":[{"title":title,"url":run_url,"description":description,"color":color,"footer":{"text":"kontakt-notizbuch · GitHub Actions monitor"},"timestamp":datetime.datetime.now(datetime.timezone.utc).isoformat()}]}
+          request = urllib.request.Request(os.environ["DISCORD_WEBHOOK_URL"], data=json.dumps(payload).encode("utf-8"), headers={"Content-Type":"application/json","User-Agent":"Higer-GitHub-Actions-Monitor"}, method="POST")
+          try:
+              with urllib.request.urlopen(request, timeout=15) as response:
+                  if response.status not in (200,204): raise RuntimeError(f"Discord returned HTTP {response.status}")
+                  print(f"Discord notification sent (HTTP {response.status}).")
+          except urllib.error.HTTPError as e:
+              print(f"Discord webhook failed with HTTP {e.code}: {e.read().decode('utf-8','replace')[:500]}", file=sys.stderr)
+              raise
+          PY
