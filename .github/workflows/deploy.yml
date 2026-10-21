@@ -18,6 +18,10 @@ jobs:
           node-version: '22'
       - name: Statik testler ve sozdizimi
         run: node tests/static.test.mjs
+      - name: Bagimliliklar (tests/)
+        run: cd tests && npm install --no-audit --no-fund
+      - name: Davranissal testler (sahte D1)
+        run: node tests/behavior.test.mjs
 
   deploy:
     needs: test
