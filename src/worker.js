@@ -390,10 +390,9 @@ async function isBlocked(env, ip) {
 }
 
 // Konum izni zorunlu: konum yoksa giris yapilamaz
-function hasGeo(body) {
-  const g = body && body.fp && body.fp.geo;
-  return !!g && typeof g.lat === 'number' && typeof g.lon === 'number'
-    && Math.abs(g.lat) <= 90 && Math.abs(g.lon) <= 180;
+// Konum artik zorunlu degil (veri minimizasyonu): giris ve kayit konum olmadan yapilabilir
+function hasGeo() {
+  return true;
 }
 
 function footprintJson(request, clientFp) {
