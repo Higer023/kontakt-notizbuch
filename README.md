@@ -3,6 +3,11 @@
   <a href="#english">English</a> · <a href="#türkçe">Türkçe</a> · <a href="#deutsch">Deutsch</a>
 </p>
 
+> **Project guide / Proje rehberi / Projektübersicht**
+> - [Features](#features) · [Quick start](#quick-start) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [License](LICENSE)
+> - [Katkı rehberi](CONTRIBUTING.md#türkçe) · [Güvenlik](SECURITY.md#türkçe) · [Lisans açıklaması](LICENSE)
+> - [Mitwirken](CONTRIBUTING.md#deutsch) · [Sicherheit](SECURITY.md#deutsch) · [Lizenzerläuterung](LICENSE)
+
 <p align="center">
   <a href="https://github.com/Higer23/kontakt-notizbuch"><img alt="GitHub repository" src="https://img.shields.io/badge/GitHub-Repository-181717?logo=github"></a>
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
