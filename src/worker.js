@@ -445,41 +445,9 @@ async function verifyAdminPassword(env, username, password) {
 }
 
 async function login(request, env, ip) {
-  const userId = 1;
-  // Parola tek basina yeterli degil: parmak izi veya kurtarma kodu ile birlikte kullanilir.
+  // Parola ile giris bilerek kapali: parola tek basina yeterli degil.
+  // Giris yalnizca parmak izi (passkey) veya kurtarma kodu ile yapilir.
   throw new HttpError(403, 'Sadece parola ile giris kapali. Parmak izi veya kurtarma kodu kullanin.');
-  if ((await recentFailCount(env, ip)) >= MAX_FAILS) {
-    throw new HttpError(429, 'Cok fazla hatali deneme. Lutfen daha sonra tekrar deneyin.');
-  }
-
-  const body = await readJson(request);
-  if (!hasGeo(body)) {
-    await recordFootprint(env, request, ip, 'login_no_geo', false, body.fp);
-    throw new HttpError(403, 'Konum izni olmadan giris yapilamaz');
-  }
-
-  if (!(await verifyTurnstile(env, body.turnstile, ip))) {
-    await recordFootprint(env, request, ip, 'login_bot', false, body.fp);
-    throw new HttpError(403, 'Dogrulama basarisiz. Lutfen tekrar deneyin.');
-  }
-
-  const username = typeof body.username === 'string' ? body.username.trim().slice(0, 100) : '';
-  const password = typeof body.password === 'string' ? body.password : '';
-  const ok = username.length > 0 && (await verifyAdminPassword(env, username, password));
-
-  await recordFootprint(env, request, ip, 'login', ok, body.fp);
-  if (!ok) throw new HttpError(401, 'Kullanici adi veya sifre hatali');
-
-  await env.DB.prepare("DELETE FROM sessions WHERE expires_at < datetime('now')").run();
-  await env.DB.prepare('DELETE FROM session_meta WHERE token_hash NOT IN (SELECT token_hash FROM sessions)').run();
-  const token = randomToken();
-  await env.DB.prepare(
-    "INSERT INTO sessions (token_hash, expires_at, reauth_until, user_id) VALUES (?, datetime('now', ?), datetime('now', ?), ?)"
-  ).bind(await sha256(token), `+${SESSION_HOURS} hours`, `+${REAUTH_MINUTES} minutes`, userId).run();
-  await env.DB.prepare('INSERT OR REPLACE INTO session_meta (token_hash, ua) VALUES (?, ?)')
-    .bind(await sha256(token), String(request.headers.get('User-Agent') || '').slice(0, 200)).run();
-
-  return json({ ok: true }, 200, { 'Set-Cookie': sessionCookie(token, SESSION_HOURS * 3600) });
 }
 
 // Cloudflare Turnstile dogrulamasi (sunucu tarafi)
