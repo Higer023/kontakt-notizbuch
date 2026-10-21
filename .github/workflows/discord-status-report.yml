@@ -20,73 +20,152 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Send detailed report to Discord
+      - name: Send Turkish, beginner-friendly report to Discord
         env:
           GH_TOKEN: ${{ github.token }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           REPO: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
           RUN_ID: ${{ github.event.workflow_run.id || github.run_id }}
-          RUN_NAME: ${{ github.event.workflow_run.name || 'Manual Discord report test' }}
+          RUN_NAME: ${{ github.event.workflow_run.name || 'Manuel Discord bildirim testi' }}
           RUN_STATUS: ${{ github.event.workflow_run.conclusion || 'manual_test' }}
           RUN_URL: ${{ github.event.workflow_run.html_url || format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch || github.ref_name }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
           ACTOR: ${{ github.event.workflow_run.actor.login || github.actor }}
           EVENT_TYPE: ${{ github.event.workflow_run.event || github.event_name }}
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name || 'Manuel Discord bildirim testi' }}
         run: |
           set -euo pipefail
           if [[ -z "${DISCORD_WEBHOOK_URL:-}" ]]; then
-            echo "::error::Missing DISCORD_WEBHOOK_URL GitHub Actions secret."
+            echo "::error::GitHub Actions secret DISCORD_WEBHOOK_URL bulunamadı."
+            echo "GitHub > Settings > Secrets and variables > Actions bölümünde DISCORD_WEBHOOK_URL oluşturun."
             exit 1
           fi
           python - <<'PY'
           import json, os, subprocess, sys, urllib.request, urllib.error, datetime
+
           def gh(path):
-              p = subprocess.run(["gh","api",path], text=True, capture_output=True, check=True,
-                                 env={**os.environ,"GH_TOKEN":os.environ["GH_TOKEN"]})
+              p = subprocess.run(["gh", "api", path], text=True, capture_output=True, check=True,
+                                 env={**os.environ, "GH_TOKEN": os.environ["GH_TOKEN"]})
               return json.loads(p.stdout)
-          repo=os.environ["REPO"]; rid=os.environ["RUN_ID"]; status=os.environ["RUN_STATUS"]
-          url=os.environ["RUN_URL"]; sha=os.environ["HEAD_SHA"]; branch=os.environ["HEAD_BRANCH"]
-          name=os.environ["RUN_NAME"]; actor=os.environ["ACTOR"]; event=os.environ["EVENT_TYPE"]
+
+          repo = os.environ["REPO"]
+          rid = os.environ["RUN_ID"]
+          status = os.environ["RUN_STATUS"]
+          url = os.environ["RUN_URL"]
+          sha = os.environ["HEAD_SHA"]
+          branch = os.environ["HEAD_BRANCH"]
+          name = os.environ["WORKFLOW_NAME"]
+          actor = os.environ["ACTOR"]
+          event = os.environ["EVENT_TYPE"]
+          source = f"https://github.com/{repo}"
+          target = "https://github.com/Higer023/kontakt-notizbuch"
+          source_actions = f"{source}/actions"
+          target_actions = f"{target}/actions"
+          manual = os.environ["EVENT_NAME"] == "workflow_dispatch"
+
           try:
-              allruns=gh(f"repos/{repo}/actions/workflows/sync-to-higer023.yml/runs?per_page=100").get("workflow_runs",[])
-              recent=[r for r in allruns if r.get("status")=="completed"][:30]
-              passed=sum(r.get("conclusion")=="success" for r in recent)
-              failed=sum(r.get("conclusion")=="failure" for r in recent)
-              other=len(recent)-passed-failed
-              rate=f"{passed/len(recent)*100:.1f}% ({passed}/{len(recent)})" if recent else "not enough data"
-              recentlinks="\n".join(f"• [{r.get('name','Sync')} #{r.get('run_number','?')}]({r.get('html_url','#')}) — {r.get('conclusion','unknown')}" for r in recent[:5]) or "No completed sync runs found."
-          except Exception:
-              passed=failed=other=0; rate="unavailable"; recentlinks="History could not be retrieved."
-          jobs=[]
+              allruns = gh(f"repos/{repo}/actions/workflows/sync-to-higer023.yml/runs?per_page=100").get("workflow_runs", [])
+              recent = [r for r in allruns if r.get("status") == "completed"][:30]
+              passed = sum(r.get("conclusion") == "success" for r in recent)
+              failed = sum(r.get("conclusion") == "failure" for r in recent)
+              other = len(recent) - passed - failed
+              rate = f"{passed / len(recent) * 100:.1f}%" if recent else "Hesaplanamadı"
+              recent_text = "\n".join(
+                  f"• [{r.get('name', 'Senkronizasyon')} #{r.get('run_number', '?')}]({r.get('html_url', source_actions)}) — "
+                  f"{'BAŞARILI' if r.get('conclusion') == 'success' else 'BAŞARISIZ' if r.get('conclusion') == 'failure' else r.get('conclusion', 'Bilinmiyor')}"
+                  for r in recent[:5]
+              ) or "Henüz tamamlanmış senkronizasyon yok."
+          except Exception as e:
+              recent = []
+              passed = failed = other = 0
+              rate = "Hesaplanamadı"
+              recent_text = "Geçmiş kayıtlar okunamadı. Kaynak Actions bağlantısını aç."
+              print(f"History lookup warning: {type(e).__name__}", file=sys.stderr)
+
           try:
-              for j in gh(f"repos/{repo}/actions/runs/{rid}/jobs?per_page=100").get("jobs",[]):
-                  steps="; ".join(f"{s.get('name','step')}: {s.get('conclusion') or s.get('status') or 'unknown'}" for s in j.get("steps",[]))
-                  jobs.append(f"• **{j.get('name','Job')}** — {j.get('conclusion') or j.get('status','unknown')}\n  {steps[:650]}")
-          except Exception:
-              jobs=["Job/step details unavailable."]
-          source=f"https://github.com/{repo}"; target="https://github.com/Higer023/kontakt-notizbuch"
-          failedstatus=status in ("failure","cancelled","timed_out","action_required")
-          color=15158332 if failedstatus else (3066993 if status=="success" else 15844367)
-          title="🚨 Automation failed" if failedstatus else ("🧪 Manual webhook test" if os.environ["EVENT_NAME"]=="workflow_dispatch" else "📡 Automation status")
-          description="\n".join([
-              f"**Workflow:** {name}",f"**Result:** {status}",f"**Branch:** {branch}",
-              f"**Commit:** [{sha[:12]}]({source}/commit/{sha})",f"**Actor:** {actor}",f"**Event:** {event}",
-              f"**Run ID:** {rid}",f"**Sync success rate (latest up to 30 completed):** {rate}",
-              f"**Counts:** {passed} passed · {failed} failed · {other} other",
-              "**Jobs and steps**\n"+"\n".join(jobs),
-              "**Recent sync runs**\n"+recentlinks,
-              f"**Source:** {source}",f"**Target:** {target}",f"**This run:** {url}",
-              f"**Source Actions:** {source}/actions",f"**Target Actions:** {target}/actions",
-              "**Note:** The historical percentage is not a guarantee of future success."
-          ])[:4000]
-          payload={"username":"Higer Sync Monitor","allowed_mentions":{"parse":[]},"embeds":[{"title":title,"url":url,"description":description,"color":color,"footer":{"text":"kontakt-notizbuch · GitHub Actions monitor"},"timestamp":datetime.datetime.now(datetime.timezone.utc).isoformat()}]}
-          req=urllib.request.Request(os.environ["DISCORD_WEBHOOK_URL"],data=json.dumps(payload).encode(),headers={"Content-Type":"application/json","User-Agent":"Higer-GitHub-Actions-Monitor"},method="POST")
+              jobs_data = gh(f"repos/{repo}/actions/runs/{rid}/jobs?per_page=100").get("jobs", [])
+              job_lines = []
+              for job in jobs_data:
+                  jc = job.get("conclusion") or job.get("status") or "bilinmiyor"
+                  ji = "✅" if jc == "success" else "❌" if jc == "failure" else "⏳" if jc == "in_progress" else "ℹ️"
+                  job_lines.append(f"{ji} **{job.get('name', 'İş')}**: {jc} ([ayrıntı]({job.get('html_url', url)}))")
+                  for step in job.get("steps", []):
+                      sc = step.get("conclusion") or step.get("status") or "bilinmiyor"
+                      si = "✅" if sc == "success" else "❌" if sc == "failure" else "⏳" if sc == "in_progress" else "ℹ️"
+                      job_lines.append(f"  {si} {step.get('name', 'Adım')}: {sc}")
+              jobs_text = "\n".join(job_lines) or "Adım ayrıntısı bulunamadı; çalışma bağlantısını aç."
+          except Exception as e:
+              jobs_text = "Adım ayrıntıları alınamadı. Çalışma bağlantısını aç."
+              print(f"Job lookup warning: {type(e).__name__}", file=sys.stderr)
+
+          if manual:
+              title = "🧪 Discord bildirimi: TEST BAŞARILI"
+              color = 3066993
+              result = "Bu mesaj Discord'a başarıyla gönderildi. Bu yalnızca bildirim kanalını test eder; tek başına dosyaların diğer depoya eşitlendiğini kanıtlamaz."
+              next_action = "1. Bu mesajı görüyorsan Discord bildirimi çalışıyor.\n2. Hedef Actions bağlantısına dokun.\n3. En son 'Automatic Sync to Higer023' çalışmasını aç; **success** yazmalı.\n4. Hedef depoda Code > Commits bölümünde yeni commit'in geldiğini kontrol et."
+          elif status == "success":
+              title = "✅ GitHub otomasyonu başarılı"
+              color = 3066993
+              result = "Bu workflow başarıyla tamamlandı. Gerçek dosya senkronizasyonunu hedef depodaki Actions ve commit listesiyle de doğrula."
+              next_action = "1. 'Bu çalışmayı aç' düğmesine dokun.\n2. Yeşil tik ve **success** gör.\n3. Hedef Actions'ta senkronizasyonun başarılı olduğunu kontrol et.\n4. Hedef depodaki commit/dosyanın geldiğini doğrula."
+          elif status in ("failure", "cancelled", "timed_out", "action_required"):
+              title = "🚨 Otomasyon başarısız — kontrol et"
+              color = 15158332
+              result = "Bu workflow başarısız, iptal edilmiş veya zaman aşımına uğramış. Değişikliklerin hedef depoya ulaştığını varsayma."
+              next_action = "1. 'Bu çalışmayı aç' düğmesine dokun.\n2. Kırmızı X olan iş/adımı aç ve hata mesajını bul.\n3. Bildirim hatasıysa Settings > Secrets and variables > Actions bölümünde **DISCORD_WEBHOOK_URL** secret'ının bulunduğunu kontrol et. Webhook adresini kimseyle paylaşma.\n4. Hata mesajını yardım için gönder; rastgele ayar değiştirme."
+          else:
+              title = "ℹ️ Durum kontrolü gerekiyor"
+              color = 15844367
+              result = f"GitHub sonucu: {status}. Bu, senkronizasyonun başarılı olduğunu tek başına kanıtlamaz."
+              next_action = "1. Bu çalışmayı aç. 2. Sonuç bölümüne bak. 3. Hedef Actions ve hedef commit listesiyle ayrıca doğrula."
+
+          metric = f"Son tamamlanan {len(recent)} senkronizasyon: **{rate} başarılı**\n✅ {passed} başarılı · ❌ {failed} başarısız · ℹ️ {other} diğer"
+          if recent and failed:
+              metric += "\nGeçmişte başarısız çalışmalar var; aşağıdaki bağlantılardan ayrıntılarını aç."
+          elif not recent:
+              metric += "\nGeçmiş verisi yok; bu oran mevcut çalışmanın sonucu değildir."
+
+          description = (
+              f"**BU NE ANLAMA GELİYOR?**\n{result}\n\n"
+              f"**ŞİMDİ NE YAPMALISIN?**\n{next_action}\n\n"
+              f"**ÇALIŞMA BİLGİSİ**\n• Workflow: {name}\n• Sonuç: `{status}`\n• Dal: `{branch}`\n"
+              f"• Commit: [{sha[:12]}]({source}/commit/{sha})\n• Başlatan: {actor}\n• Olay: `{event}`\n• Çalışma ID: {rid}"
+          )[:4000]
+          fields = [
+              {"name": "📊 Geçmiş başarı oranı (mevcut çalışmadan ayrı)", "value": metric[:1024], "inline": False},
+              {"name": "🧩 İş ve adım sonuçları", "value": jobs_text[:1024] or "Ayrıntı yok", "inline": False},
+              {"name": "🕘 Son senkronizasyon çalışmaları", "value": recent_text[:1024], "inline": False},
+              {"name": "🔗 Bağlantılar", "value":
+                  f"[1 — Bu çalışmanın ayrıntıları]({url})\n[2 — Kaynak depo Actions]({source_actions})\n"
+                  f"[3 — Hedef depo Actions]({target_actions})\n[4 — Kaynak commit listesi]({source}/commits/{branch})\n"
+                  f"[5 — Hedef commit listesi]({target}/commits/main)", "inline": False},
+              {"name": "ℹ️ Önemli", "value":
+                  "Geçmiş başarı yüzdesi geleceği garanti etmez. Başarılı senkronizasyon için hedef Actions sonucu ve dosya/commit'in hedefe geldiği birlikte doğrulanmalı.", "inline": False}
+          ]
+          payload = {
+              "username": "Higer Sync Monitor",
+              "allowed_mentions": {"parse": []},
+              "embeds": [{
+                  "title": title, "url": url, "description": description, "color": color,
+                  "fields": fields, "footer": {"text": "Türkçe rehber · kontakt-notizbuch GitHub Actions"},
+                  "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+              }],
+              "components": [{"type": 1, "components": [
+                  {"type": 2, "style": 5, "label": "Bu çalışmayı aç", "url": url},
+                  {"type": 2, "style": 5, "label": "Kaynak Actions", "url": source_actions},
+                  {"type": 2, "style": 5, "label": "Hedef Actions", "url": target_actions}
+              ]}]
+          }
+          req = urllib.request.Request(os.environ["DISCORD_WEBHOOK_URL"], data=json.dumps(payload).encode(),
+              headers={"Content-Type": "application/json", "User-Agent": "Higer-GitHub-Actions-Monitor"}, method="POST")
           try:
-              with urllib.request.urlopen(req,timeout=15) as res:
-                  if res.status not in (200,204): raise RuntimeError(f"Discord HTTP {res.status}")
-                  print(f"Discord notification sent: HTTP {res.status}")
+              with urllib.request.urlopen(req, timeout=15) as res:
+                  if res.status not in (200, 204):
+                      raise RuntimeError(f"Discord HTTP {res.status}")
+                  print(f"Discord bildirimi gönderildi: HTTP {res.status}")
           except urllib.error.HTTPError as e:
-              print(f"Discord webhook failed: HTTP {e.code}",file=sys.stderr); raise
+              print(f"Discord webhook hatası: HTTP {e.code}", file=sys.stderr)
+              raise
           PY
