@@ -1,100 +1,98 @@
-name: Sync PR to Higer023
+
+name: Automatic Sync to Higer023
 
 on:
   push:
-    branches: [main]
-  schedule:
-    - cron: '17 5 * * *'
+    branches:
+      - main
   workflow_dispatch:
+  schedule:
+    - cron: "17 5 * * *"
 
 permissions:
   contents: read
 
 concurrency:
-  group: sync-pr-to-higer023
+  group: automatic-sync-higer023
   cancel-in-progress: false
 
 jobs:
-  open-pr:
-    name: Open or report sync PR
+  sync:
+    name: Copy, verify and commit
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    env:
-      GH_TOKEN: ${{ secrets.SYNC_PR_TOKEN }}
-      TARGET: Higer023/kontakt-notizbuch
-      SOURCE_OWNER: Higer23
-      BRANCH: main
+    timeout-minutes: 15
+
     steps:
-      - name: Check token and target access
+      - name: Checkout source repository
+        uses: actions/checkout@v4
+        with:
+          repository: Higer23/kontakt-notizbuch
+          ref: main
+          path: source
+          persist-credentials: false
+
+      - name: Checkout target main
+        uses: actions/checkout@v4
+        with:
+          repository: Higer023/kontakt-notizbuch
+          ref: main
+          token: ${{ secrets.SYNC_PR_TOKEN }}
+          path: target
+          persist-credentials: true
+
+      - name: Validate repositories and token
+        shell: bash
         run: |
           set -euo pipefail
-          if [ -z "${GH_TOKEN:-}" ]; then
-            echo "::error::SYNC_PR_TOKEN secret is missing or empty."
-            exit 1
-          fi
-          gh api "repos/$TARGET" --jq .full_name
+          test -f source/README.md
+          test -f source/.github/workflows/sync-to-higer023.yml
+          test -d target/.git
+          git -C source status --short
+          git -C target status --short
+          echo "Source and target check passed."
 
-      - name: Compare source and target
-        id: cmp
+      - name: Copy source files
+        shell: bash
         run: |
           set -euo pipefail
-          DATA=$(gh api "repos/$TARGET/compare/$BRANCH...$SOURCE_OWNER:$BRANCH")
-          echo "ahead=$(jq -r .ahead_by <<<"$DATA")" >> "$GITHUB_OUTPUT"
-          echo "behind=$(jq -r .behind_by <<<"$DATA")" >> "$GITHUB_OUTPUT"
-          echo "files=$(jq -r '.files | length' <<<"$DATA")" >> "$GITHUB_OUTPUT"
-          SENSITIVE=$(jq -r '[.files[].filename
-            | select(startswith("tests/") | not)
-            | select(test("worker|crypto|auth|session|recovery|schema|migration|wrangler|secret"; "i"))]
-            | join(", ")' <<<"$DATA")
-          echo "sensitive=$SENSITIVE" >> "$GITHUB_OUTPUT"
 
-      - name: Open PR if needed
+          # Do not copy Git metadata or overwrite target's own sync workflow.
+          rsync -a --checksum \
+            --exclude='.git/' \
+            --exclude='.github/workflows/sync-to-higer023.yml' \
+            source/ target/
+
+      - name: Verify copied files
+        shell: bash
+        run: |
+          set -euo pipefail
+          diff -qr \
+            --exclude='.git' \
+            --exclude='sync-to-higer023.yml' \
+            source target
+          echo "Copied source files verified."
+
+      - name: Commit and push to target main
+        working-directory: target
         env:
-          AHEAD: ${{ steps.cmp.outputs.ahead }}
-          BEHIND: ${{ steps.cmp.outputs.behind }}
-          FILES: ${{ steps.cmp.outputs.files }}
-          SENSITIVE: ${{ steps.cmp.outputs.sensitive }}
+          GH_TOKEN: ${{ secrets.SYNC_PR_TOKEN }}
+        shell: bash
         run: |
           set -euo pipefail
 
-          {
-            echo "### Sync Higer23 -> Higer023"
-            echo "- Commits only in source: $AHEAD"
-            echo "- Commits only in target: $BEHIND"
-            echo "- Files changed: $FILES"
-          } >> "$GITHUB_STEP_SUMMARY"
+          git config user.name "Higer23 Sync Bot"
+          git config user.email "higer23-sync-bot@users.noreply.github.com"
 
-          if [ "$BEHIND" -gt 0 ]; then
-            echo "::notice::Target has $BEHIND commit(s) missing in source. After merging, use 'Sync fork' on Higer23."
-          fi
+          git add -A
 
-          if [ "$AHEAD" -eq 0 ]; then
-            echo "Nothing to sync."
-            echo "Result: nothing to sync." >> "$GITHUB_STEP_SUMMARY"
+          if git diff --cached --quiet; then
+            echo "Target is already synchronized."
             exit 0
           fi
 
-          EXISTING=$(gh api "repos/$TARGET/pulls?state=open&head=$SOURCE_OWNER:$BRANCH&base=$BRANCH" --jq '.[0].html_url // empty')
-          if [ -n "$EXISTING" ]; then
-            echo "PR already open: $EXISTING (it updates itself with new commits)"
-            echo "Result: PR already open: $EXISTING" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
+          git commit -m "chore(sync): update from Higer23 main"
 
-          {
-            echo "Automatic sync PR. Nothing is merged automatically; review and check results first."
-            echo
-            echo "- Commits only in source: $AHEAD"
-            echo "- Commits only in target: $BEHIND"
-            echo "- Files changed: $FILES"
-            if [ -n "$SENSITIVE" ]; then
-              echo
-              echo "**Careful review needed.** Security-related files changed: $SENSITIVE"
-            fi
-          } > "$RUNNER_TEMP/pr-body.md"
+          # Never force-push. If main moved concurrently, fail safely.
+          git push origin HEAD:main
 
-          URL=$(gh pr create --repo "$TARGET" --base "$BRANCH" --head "$SOURCE_OWNER:$BRANCH" \
-            --title "Sync Higer23 main into Higer023 main" \
-            --body-file "$RUNNER_TEMP/pr-body.md")
-          echo "PR opened: $URL"
-          echo "Result: PR opened: $URL" >> "$GITHUB_STEP_SUMMARY"
+          echo "Synchronization commit pushed successfully."
