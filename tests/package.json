@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "devDependencies": {
-    "sql.js": "1.11.0"
+    "sql.js": "1.15.0"
   }
 }
