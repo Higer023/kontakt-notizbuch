@@ -233,10 +233,10 @@ await test('giris kaydi ham parmak izi icermez, cihaz ozeti tutar', async () => 
 
 await test('gunluk cron 90 gunu asan giris kayitlarini siler; sinir icindeki kayitlari korur', async () => {
   const { db, DB } = makeDb(); db.exec(schema);
-  db.exec("INSERT INTO login_logs_v2 (idx, success, event, sealed, created_at) VALUES
+  db.exec(`INSERT INTO login_logs_v2 (idx, success, event, sealed, created_at) VALUES
     ('idx-89', 1, 'login', 'test', datetime('now', '-89 days')),
     ('idx-90', 1, 'login', 'test', datetime('now', '-90 days', '+1 minute')),
-    ('idx-91', 1, 'login', 'test', datetime('now', '-91 days'))");
+    ('idx-91', 1, 'login', 'test', datetime('now', '-91 days'))`);
   const scheduledPromises = [];
   await worker.scheduled({ cron: '0 6 * * *' }, envFor(DB), { waitUntil(promise) { scheduledPromises.push(promise); } });
   await Promise.all(scheduledPromises);
