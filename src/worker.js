@@ -145,7 +145,7 @@ async function handleApi(request, env, url) {
   if (pathname === '/api/vault/contacts' && method === 'POST') return vaultCreate(request, env, session.user_id);
   if (pathname === '/api/vault/batch' && method === 'POST') return vaultBatch(request, env, session.fresh, session.user_id);
   if (pathname === '/api/vault/legacy' && method === 'GET') return vaultLegacy(env);
-  if (pathname === '/api/vault/import' && method === 'POST') return vaultImport(request, env);
+  if (pathname === '/api/vault/import' && method === 'POST') return vaultImport(request, env, session.user_id);
 
   const vaultMatch = pathname.match(/^\/api\/vault\/contacts\/(\d+)$/);
   if (vaultMatch) {
@@ -259,14 +259,17 @@ async function vaultLegacy(env) {
 }
 
 // Gecis: istemci duz metni sifreleyip gonderir. final=true olunca bir daha calismaz.
-async function vaultImport(request, env) {
+async function vaultImport(request, env, uid) {
   if (await isMigrated(env)) throw new HttpError(409, 'Gecis zaten tamamlandi');
   const body = await readJson(request);
   const records = Array.isArray(body.records) ? body.records : [];
   if (records.length > VAULT_BATCH_MAX) throw new HttpError(400, 'Cok fazla kayit');
+  // Yalnizca ayni kullanicinin kaydini gunceller; baska kullanicinin kaydini ezmez.
   const stmts = records.map((r) => env.DB.prepare(
-    "INSERT OR REPLACE INTO encrypted_contacts (id, payload, updated_at) VALUES (?, ?, datetime('now'))"
-  ).bind(checkId(r.id), checkPayload(r.payload)));
+    "INSERT INTO encrypted_contacts (id, payload, user_id, updated_at) VALUES (?, ?, ?, datetime('now')) " +
+    "ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at " +
+    "WHERE encrypted_contacts.user_id = excluded.user_id"
+  ).bind(checkId(r.id), checkPayload(r.payload), uid));
   if (body.final === true) {
     stmts.push(env.DB.prepare("INSERT OR IGNORE INTO migrations (name) VALUES ('contacts_v1')"));
   }
