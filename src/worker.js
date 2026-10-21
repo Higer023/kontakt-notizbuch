@@ -96,6 +96,7 @@ async function handleApi(request, env, url) {
 
   if (pathname === '/api/signup/start' && method === 'POST') return signupStart(request, env, ip, url);
   if (pathname === '/api/signup/finish' && method === 'POST') return signupFinish(request, env, ip, url);
+  if (pathname === '/api/recovery/user' && method === 'POST') return userRecoveryLogin(request, env, ip);
   if (pathname === '/api/login' && method === 'POST') return login(request, env, ip);
   if (pathname === '/api/logout' && method === 'POST') return logout(request, env);
   if (pathname === '/api/passkey/login/options' && method === 'POST') return passkeyLoginOptions(env, url);
@@ -1062,10 +1063,43 @@ async function signupFinish(request, env, ip, url) {
     "SELECT id FROM users WHERE id = ? AND pending = 1 AND created_at > datetime('now', '-15 minutes')"
   ).bind(uid).first();
   if (!pending) throw new HttpError(400, 'Kayit suresi doldu, lutfen tekrar deneyin');
+  const rec = peek.recovery || {};
+  const recHash = typeof rec.code_hash === 'string' && /^[0-9a-f]{64}$/.test(rec.code_hash) ? rec.code_hash : null;
+  const recBlob = typeof rec.blob === 'string' && rec.blob.length >= 20 && rec.blob.length <= 4000 ? rec.blob : null;
+  if (!recHash || !recBlob) throw new HttpError(400, 'Kurtarma kodu eksik');
   await passkeyRegisterVerify(request, env, url, uid);
-  await env.DB.prepare('UPDATE users SET pending = 0 WHERE id = ?').bind(uid).run();
+  await env.DB.prepare('UPDATE users SET pending = 0, recovery_hash = ?, recovery_blob = ? WHERE id = ?').bind(recHash, recBlob, uid).run();
   await recordFootprint(env, request, ip, 'signup', true, peek.fp);
   return json({ ok: true }, 200, { 'Set-Cookie': await passkeySessionCookie(request, env, uid) });
+}
+
+
+// Kullanici kurtarma: kullanici adi + kurtarma kodu. Sunucu kodu bilmez; parolayi tarayici kodla cozer.
+async function userRecoveryLogin(request, env, ip) {
+  if ((await recentFailCount(env, ip)) >= MAX_FAILS) {
+    throw new HttpError(429, 'Cok fazla hatali deneme. Lutfen daha sonra tekrar deneyin.');
+  }
+  const body = await readJson(request);
+  if (!hasGeo(body)) {
+    await recordFootprint(env, request, ip, 'recovery_no_geo', false, body.fp);
+    throw new HttpError(403, 'Konum izni olmadan giris yapilamaz');
+  }
+  if (!(await verifyTurnstile(env, body.turnstile, ip))) {
+    await recordFootprint(env, request, ip, 'recovery_bot', false, body.fp);
+    throw new HttpError(403, 'Dogrulama basarisiz. Lutfen tekrar deneyin.');
+  }
+  const username = typeof body.username === 'string' ? body.username.trim().slice(0, 100) : '';
+  const code = normalizeRecoveryCode(body.code);
+  const u = username && code.length >= 20
+    ? await env.DB.prepare(
+        'SELECT id, recovery_hash, recovery_blob FROM users WHERE lower(username) = lower(?) AND pending = 0'
+      ).bind(username).first()
+    : null;
+  const ok = !!u && !!u.recovery_hash && !!u.recovery_blob &&
+    timingSafeEqualStr(hexOf(await digestBytes(new TextEncoder().encode(code))), u.recovery_hash);
+  await recordFootprint(env, request, ip, 'recovery', ok, body.fp);
+  if (!ok) throw new HttpError(401, 'Kullanici adi veya kurtarma kodu hatali');
+  return json({ ok: true, blob: u.recovery_blob }, 200, { 'Set-Cookie': await passkeySessionCookie(request, env, u.id) });
 }
 
 function unb64(s) {
