@@ -1,0 +1,64 @@
+name: Automation failure report
+
+on:
+  workflow_run:
+    workflows:
+      - Deploy
+      - Automatic Sync to Higer023
+      - Quality Gate
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  report-failure:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'timed_out' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Report to GitHub summary
+        env:
+          RUN_NAME: ${{ github.event.workflow_run.name }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          {
+            echo "## Automation failure"
+            echo "- Workflow: ${RUN_NAME}"
+            echo "- Result: ${CONCLUSION}"
+            echo "- Branch: ${BRANCH}"
+            echo "- Commit: ${SHA}"
+            echo "- Run: ${RUN_URL}"
+            echo
+            echo "The failed result is preserved. No checks were skipped and no branch protections were bypassed."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Notify Discord if webhook is configured
+        if: ${{ secrets.DISCORD_WEBHOOK_URL != '' }}
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          RUN_NAME: ${{ github.event.workflow_run.name }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          set -euo pipefail
+          payload=$(jq -n \
+            --arg title "GitHub automation failed" \
+            --arg workflow "$RUN_NAME" \
+            --arg result "$CONCLUSION" \
+            --arg branch "$BRANCH" \
+            --arg sha "${SHA:0:12}" \
+            --arg url "$RUN_URL" \
+            '{embeds:[{title:$title,color:15158332,fields:[{name:"Workflow",value:$workflow},{name:"Result",value:$result},{name:"Branch",value:$branch},{name:"Commit",value:$sha}],url:$url}]}')
+          curl --fail --silent --show-error \
+            --retry 2 --retry-delay 1 \
+            -H 'Content-Type: application/json' \
+            -d "$payload" "$DISCORD_WEBHOOK_URL" >/dev/null
+      - name: Note missing Discord configuration
+        if: ${{ secrets.DISCORD_WEBHOOK_URL == '' }}
+        run: echo "::warning::DISCORD_WEBHOOK_URL is not configured; the failure is recorded in GitHub Actions but Discord notification was not sent."
