@@ -75,6 +75,8 @@ function clientIp(request) {
   return request.headers.get('CF-Connecting-IP') || 'unknown';
 }
 
+const ADMIN_ONLY = /^\/api\/(logs|sessions|security|blocks|recovery\/rotate|passkey\/(register|delete|list)|vault\/(legacy|import))/;
+
 async function handleApi(request, env, url) {
   const { pathname } = url;
   const method = request.method;
@@ -105,6 +107,7 @@ async function handleApi(request, env, url) {
     if (!session.fresh) throw new HttpError(428, 'Bu islem icin sifrenizi tekrar girin');
   };
 
+  if (ADMIN_ONLY.test(pathname) && !session.is_admin) throw new HttpError(403, 'Yonetici yetkisi gerekli');
   if (pathname === '/api/reauth' && method === 'POST') return reauth(request, env, ip, session);
   if (pathname === '/api/me' && method === 'GET') return json({ ok: true });
   if (pathname === '/api/passkey/register/options' && method === 'POST') { requireFresh(); return passkeyRegisterOptions(env, url); }
@@ -134,19 +137,19 @@ async function handleApi(request, env, url) {
   }
   if (pathname === '/api/vault/status' && method === 'GET') return vaultStatus(env);
   if (pathname === '/api/vault/init' && method === 'POST') return vaultInit(request, env);
-  if (pathname === '/api/vault/contacts' && method === 'GET') return vaultList(env);
-  if (pathname === '/api/vault/contacts' && method === 'POST') return vaultCreate(request, env);
-  if (pathname === '/api/vault/batch' && method === 'POST') return vaultBatch(request, env, session.fresh);
+  if (pathname === '/api/vault/contacts' && method === 'GET') return vaultList(env, session.user_id);
+  if (pathname === '/api/vault/contacts' && method === 'POST') return vaultCreate(request, env, session.user_id);
+  if (pathname === '/api/vault/batch' && method === 'POST') return vaultBatch(request, env, session.fresh, session.user_id);
   if (pathname === '/api/vault/legacy' && method === 'GET') return vaultLegacy(env);
   if (pathname === '/api/vault/import' && method === 'POST') return vaultImport(request, env);
 
   const vaultMatch = pathname.match(/^\/api\/vault\/contacts\/(\d+)$/);
   if (vaultMatch) {
     const id = Number(vaultMatch[1]);
-    if (method === 'PUT') return vaultPut(request, env, id);
+    if (method === 'PUT') return vaultPut(request, env, id, session.user_id);
     if (method === 'DELETE') {
       requireFresh();
-      return vaultDelete(env, id);
+      return vaultDelete(env, id, session.user_id);
     }
   }
 
@@ -192,39 +195,39 @@ async function vaultInit(request, env) {
   return json({ salt: row.salt });
 }
 
-async function vaultList(env) {
+async function vaultList(env, uid) {
   const { results } = await env.DB.prepare(
-    'SELECT id, payload, updated_at FROM encrypted_contacts ORDER BY id LIMIT ?'
-  ).bind(VAULT_BATCH_MAX * 10).all();
+    'SELECT id, payload, updated_at FROM encrypted_contacts WHERE user_id = ? ORDER BY id LIMIT ?'
+  ).bind(uid, VAULT_BATCH_MAX * 10).all();
   return json({ contacts: results });
 }
 
-async function vaultCreate(request, env) {
+async function vaultCreate(request, env, uid) {
   const body = await readJson(request);
   const payload = checkPayload(body.payload);
   const row = await env.DB.prepare(
-    'INSERT INTO encrypted_contacts (payload) VALUES (?) RETURNING id, payload, updated_at'
-  ).bind(payload).first();
+    'INSERT INTO encrypted_contacts (payload, user_id) VALUES (?, ?) RETURNING id, payload, updated_at'
+  ).bind(payload, uid).first();
   return json({ contact: row }, 201);
 }
 
-async function vaultPut(request, env, id) {
+async function vaultPut(request, env, id, uid) {
   const body = await readJson(request);
   const payload = checkPayload(body.payload);
   const row = await env.DB.prepare(
-    "UPDATE encrypted_contacts SET payload = ?, updated_at = datetime('now') WHERE id = ? RETURNING id, payload, updated_at"
-  ).bind(payload, id).first();
+    "UPDATE encrypted_contacts SET payload = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ? RETURNING id, payload, updated_at"
+  ).bind(payload, id, uid).first();
   if (!row) throw new HttpError(404, 'Kisi bulunamadi');
   return json({ contact: row });
 }
 
-async function vaultDelete(env, id) {
-  await env.DB.prepare('DELETE FROM encrypted_contacts WHERE id = ?').bind(id).run();
+async function vaultDelete(env, id, uid) {
+  await env.DB.prepare('DELETE FROM encrypted_contacts WHERE id = ? AND user_id = ?').bind(id, uid).run();
   return json({ ok: true });
 }
 
 // Birden fazla kisiyi tek atomik islemde gunceller/siler (iliski ve silme icin)
-async function vaultBatch(request, env, fresh) {
+async function vaultBatch(request, env, fresh, uid) {
   const body = await readJson(request);
   const puts = Array.isArray(body.puts) ? body.puts : [];
   const deletes = Array.isArray(body.deletes) ? body.deletes : [];
@@ -235,9 +238,9 @@ async function vaultBatch(request, env, fresh) {
   if (deletes.length && !fresh) throw new HttpError(428, 'Bu islem icin sifrenizi tekrar girin');
   const stmts = [
     ...puts.map((p) => env.DB.prepare(
-      "INSERT OR REPLACE INTO encrypted_contacts (id, payload, updated_at) VALUES (?, ?, datetime('now'))"
-    ).bind(checkId(p.id), checkPayload(p.payload))),
-    ...deletes.map((id) => env.DB.prepare('DELETE FROM encrypted_contacts WHERE id = ?').bind(checkId(id))),
+      "INSERT INTO encrypted_contacts (id, payload, user_id, updated_at) VALUES (?, ?, ?, datetime('now')) ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at WHERE encrypted_contacts.user_id = excluded.user_id"
+    ).bind(checkId(p.id), checkPayload(p.payload), uid)),
+    ...deletes.map((id) => env.DB.prepare('DELETE FROM encrypted_contacts WHERE id = ? AND user_id = ?').bind(checkId(id), uid)),
   ];
   await env.DB.batch(stmts);
   return json({ ok: true });
@@ -436,6 +439,7 @@ async function verifyAdminPassword(env, username, password) {
 }
 
 async function login(request, env, ip) {
+  const userId = 1;
   // Parola tek basina yeterli degil: parmak izi veya kurtarma kodu ile birlikte kullanilir.
   throw new HttpError(403, 'Sadece parola ile giris kapali. Parmak izi veya kurtarma kodu kullanin.');
   if ((await recentFailCount(env, ip)) >= MAX_FAILS) {
@@ -464,8 +468,8 @@ async function login(request, env, ip) {
   await env.DB.prepare('DELETE FROM session_meta WHERE token_hash NOT IN (SELECT token_hash FROM sessions)').run();
   const token = randomToken();
   await env.DB.prepare(
-    "INSERT INTO sessions (token_hash, expires_at, reauth_until) VALUES (?, datetime('now', ?), datetime('now', ?))"
-  ).bind(await sha256(token), `+${SESSION_HOURS} hours`, `+${REAUTH_MINUTES} minutes`).run();
+    "INSERT INTO sessions (token_hash, expires_at, reauth_until, user_id) VALUES (?, datetime('now', ?), datetime('now', ?), ?)"
+  ).bind(await sha256(token), `+${SESSION_HOURS} hours`, `+${REAUTH_MINUTES} minutes`, userId).run();
   await env.DB.prepare('INSERT OR REPLACE INTO session_meta (token_hash, ua) VALUES (?, ?)')
     .bind(await sha256(token), String(request.headers.get('User-Agent') || '').slice(0, 200)).run();
 
@@ -547,10 +551,11 @@ async function requireSession(request, env) {
   const token = getCookie(request, 'session');
   if (!token) return null;
   const row = await env.DB.prepare(
-    "SELECT token_hash, (reauth_until IS NOT NULL AND reauth_until > datetime('now')) AS fresh FROM sessions WHERE token_hash = ? AND expires_at > datetime('now')"
+    "SELECT s.token_hash, s.user_id, u.is_admin, (s.reauth_until IS NOT NULL AND s.reauth_until > datetime('now')) AS fresh FROM sessions s LEFT JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > datetime('now')"
   ).bind(await sha256(token)).first();
   if (!row) return null;
-  return { token_hash: row.token_hash, fresh: !!row.fresh };
+  const uid = row.user_id == null ? 1 : row.user_id;
+  return { token_hash: row.token_hash, user_id: uid, is_admin: row.user_id == null ? true : !!row.is_admin, fresh: !!row.fresh };
 }
 
 function parseJsonSafe(text) {
@@ -1327,13 +1332,13 @@ async function verifyAssertion(env, a, url) {
   }
 }
 
-async function passkeySessionCookie(request, env) {
+async function passkeySessionCookie(request, env, userId = 1) {
   await env.DB.prepare("DELETE FROM sessions WHERE expires_at < datetime('now')").run();
   await env.DB.prepare('DELETE FROM session_meta WHERE token_hash NOT IN (SELECT token_hash FROM sessions)').run();
   const token = randomToken();
   await env.DB.prepare(
-    "INSERT INTO sessions (token_hash, expires_at, reauth_until) VALUES (?, datetime('now', ?), datetime('now', ?))"
-  ).bind(await sha256(token), `+${SESSION_HOURS} hours`, `+${REAUTH_MINUTES} minutes`).run();
+    "INSERT INTO sessions (token_hash, expires_at, reauth_until, user_id) VALUES (?, datetime('now', ?), datetime('now', ?), ?)"
+  ).bind(await sha256(token), `+${SESSION_HOURS} hours`, `+${REAUTH_MINUTES} minutes`, userId).run();
   await env.DB.prepare('INSERT OR REPLACE INTO session_meta (token_hash, ua) VALUES (?, ?)')
     .bind(await sha256(token), String(request.headers.get('User-Agent') || '').slice(0, 200)).run();
   return sessionCookie(token, SESSION_HOURS * 3600);
