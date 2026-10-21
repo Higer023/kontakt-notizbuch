@@ -31,14 +31,11 @@ Davranissal testler bellek ici SQLite (sql.js) ile Worker'i calistirir. Gercek b
 
 `main` dalina her push'ta `.github/workflows/deploy.yml` calisir. Once `test` isi (statik kontroller ve davranissal testler) calisir; basarisiz olursa dagitim yapilmaz. Pull request'lerde ise `.github/workflows/tests.yml` yalnizca testleri calistirir, dagitim yapmaz. GitHub CodeQL varsayilan analizi JavaScript/TypeScript ve Python icin etkinlestirildi; analiz sonucunu Security > Code scanning alanindan kontrol edin. Dependabot ayarlari `.github/dependabot.yml` dosyasinda tutulur.
 
-## 4. GitHub guvenlik ayarlari (repo sahibi yapmali)
+## 4. GitHub guvenlik ayarlari
 
 Repo ayarlari kontrol edildiginde Secret scanning, push protection ve Dependabot security updates etkin gorunuyordu. CodeQL varsayilan kurulumu da etkinlestirildi. Bu ayarlar zaman icinde degisebileceginden Settings > Security alanindan tekrar kontrol edin.
 
-Henuz uygulanmasi gereken manuel oneriler:
-- `main` icin branch protection/ruleset kurun: dogrudan push yerine PR kullanin ve test kontrolleri basarili olmadan birlestirmeyi engelleyin.
-- Dependabot alerts ve dependency graph'in etkin oldugunu dogrulayin.
-- GitHub Security > Code scanning alaninda ilk CodeQL sonucunu inceleyin.
+`main` dalinda branch protection etkin: PR zorunlu, `test` kontrolu gerekli, force-push ve dal silme kapali, yonetici de kurallara tabi. Ilk CodeQL sonucunu GitHub Security > Code scanning alaninda inceleyin; Dependabot alerts ve dependency graph durumunu da arayuzden dogrulayin.
 
 ## 5. Gunluk log temizligi
 
