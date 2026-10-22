@@ -20,10 +20,8 @@ jobs:
     steps:
       - name: Send one concise status message to Discord
         env:
-          GH_TOKEN: ${{ github.token }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.event.workflow_run.id || github.run_id }}
           RUN_NAME: ${{ github.event.workflow_run.name || 'Manual Discord notification test' }}
           RUN_STATUS: ${{ github.event.workflow_run.conclusion || 'manual_test' }}
           RUN_URL: ${{ github.event.workflow_run.html_url || format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}
@@ -35,26 +33,6 @@ jobs:
             echo "::error::GitHub Actions secret DISCORD_WEBHOOK_URL is missing."
             exit 1
           fi
-          if [[ "${RUN_STATUS}" == "success" ]]; then
-            TITLE="✅ İşlem başarılı"
-            COLOR=3066993
-            SUMMARY="Senkronizasyon/dağıtım adımı başarılı tamamlandı."
-          elif [[ "${RUN_STATUS}" == "failure" || "${RUN_STATUS}" == "cancelled" || "${RUN_STATUS}" == "timed_out" ]]; then
-            TITLE="❌ İşlem başarısız"
-            COLOR=15158332
-            SUMMARY="İşlem başarısız, iptal edildi veya zaman aşımına uğradı. Ayrıntı için GitHub Actions bağlantısını aç."
-          else
-            TITLE="ℹ️ İşlem durumu: ${RUN_STATUS}"
-            COLOR=15844367
-            SUMMARY="Sonuç: ${RUN_STATUS}. Ayrıntılar GitHub Actions'ta."
-          fi
-          SHORT_SHA="${HEAD_SHA:0:7}"
-          SOURCE="https://github.com/${REPO}"
-          TARGET="https://github.com/Higer023/kontakt-notizbuch/commits/main"
-          python - <<'PY' > /tmp/payload.json
-          import json, os, datetime
-          title = os.environ['TITLE'] if 'TITLE' in os.environ else ''
-          PY
           python - <<'PY' > /tmp/payload.json
           import json, os
           status = os.environ['RUN_STATUS']
@@ -66,7 +44,7 @@ jobs:
               title, color, summary = 'ℹ️ İşlem durumu: ' + status, 15844367, 'Sonuç: ' + status
           repo = os.environ['REPO']
           sha = os.environ['HEAD_SHA'][:7]
-          links = f"[Çalışma ayrıntısı]({os.environ['RUN_URL']}) · [Kaynak Actions](https://github.com/{repo}/actions) · [Hedef commitler](https://github.com/Higer023/kontakt-notizbuch/commits/main)"
+          links = f"[İşlem ayrıntısı]({os.environ['RUN_URL']}) · [Kaynak Actions](https://github.com/{repo}/actions) · [Hedef commitler](https://github.com/Higer023/kontakt-notizbuch/commits/main)"
           description = f"**{summary}**\n{os.environ['RUN_NAME']} · `{os.environ['HEAD_BRANCH']}` · `{sha}`\n{links}"
           print(json.dumps({'username':'Higer Sync Monitor','allowed_mentions':{'parse':[]},'embeds':[{'title':title,'description':description,'color':color,'footer':{'text':'kontakt-notizbuch · kısa otomasyon bildirimi'}}]}))
           PY
