@@ -1,0 +1,40 @@
+{
+  "name": "kontakt-notizbuch stable snapshot",
+  "version": "7-guncel-paket",
+  "source_repository": "Higer23/kontakt-notizbuch",
+  "source_branch": "main",
+  "source_commit": "8ddee4be4dc8a8a9e779e6c3da4eab5e2e172334",
+  "captured_at_utc": "2026-10-22",
+  "package_scope": "All tracked files outside the existing stable/ archive, preserving their repository-relative paths; plus a generated tests/package-lock.json for reproducible test dependency installation.",
+  "deployment": "Archive only; not deployed from this nested directory.",
+  "validation": {
+    "github_actions_test_workflow": "success",
+    "workflow_run_url": "https://github.com/Higer23/kontakt-notizbuch/actions/runs/39698063182",
+    "local_tests": {
+      "static": {
+        "passed": 6
+      },
+      "behavior": {
+        "passed": 19
+      },
+      "crypto": {
+        "passed": 5
+      },
+      "csv": {
+        "passed": 8
+      },
+      "repository_integrity": {
+        "passed": 24
+      },
+      "schema": {
+        "passed": 6
+      },
+      "total_passed": 68
+    },
+    "npm_audit_high_or_above": {
+      "vulnerabilities": 0
+    },
+    "known_issue": "Legacy tests/run-tests.mjs invokes tests/d1.py, which currently fails with SQLite OperationalError: no such column: user_id. See README for details.",
+    "live_environment_tests": "Not performed: production D1, mail/push delivery, live passkey/recovery, and mobile-browser smoke tests."
+  }
+}
