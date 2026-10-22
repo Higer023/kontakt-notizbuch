@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Rehber">
+  <title>Rehber</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/icons/apple-180.png">
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+</head>
+<body>
+  <div class="bg" aria-hidden="true"><span class="blob b1"></span><span class="blob b2"></span></div>
+
+  <section id="login-view" class="screen-center hidden">
+    <form id="login-form" class="glass login-card">
+      <div class="login-mark">R</div>
+      <h1>Rehber</h1>
+      <p class="muted">Giris icin kasa parolasi ve ikinci dogrulama gerekir: parmak izi ya da kurtarma kodu.</p>
+      <input type="text" id="username" placeholder="Kullanici adi" autocomplete="username" required>
+      <input type="password" id="password" placeholder="Sifre" autocomplete="current-password" required>
+      <p id="password-hint" class="muted" style="font-size:12px;margin:0">Ipucu: _</p>
+      <div class="cf-turnstile" data-sitekey="0x4AAAAAAFWHrfVQBQ0eBkIP" data-theme="dark"></div>
+        <button type="button" id="passkey-login" class="glass">Parmak izi ile giris</button>
+        <button type="button" id="recovery-login" class="glass">Kurtarma kodu ile giris</button>
+        <p class="muted" style="font-size:12px;margin:0">Parolayi yazdiktan sonra parmak izi veya kurtarma kodu ile dogrulayin.</p>
+      <p id="login-error" class="error" role="alert"></p>
+    </form>
+  </section>
+
+  <section id="app-view" class="hidden">
+    <header class="largebar">
+      <div>
+        <p class="eyebrow">Kisisel</p>
+        <h1 id="page-title">Kisiler</h1>
+      </div>
+    </header>
+
+    <main>
+      <div id="contacts-tab">
+        <div class="toolbar">
+          <input type="search" id="search" class="glass search" placeholder="Ara: isim, okul, grup, etiket">
+          <button type="button" id="sel-toggle" class="glass">Sec</button>
+<select id="city-filter" class="glass"></select>
+<select id="tag-filter" class="glass"></select>
+<select id="group-filter" class="glass select"><option value="">Tum gruplar</option></select>
+        </div>
+        <div id="contacts-grid" class="grid"></div>
+      </div>
+
+      <div id="security-tab" class="hidden">
+        <div class="stats">
+          <div class="glass stat"><b id="stat-total">0</b><span>Deneme</span></div>
+          <div class="glass stat"><b id="stat-fail">0</b><span>Basarisiz</span></div>
+          <div class="glass stat"><b id="stat-blocked">0</b><span>Engelli</span></div>
+        </div>
+        <div class="section-head"><h2>Adresler</h2></div>
+        <div id="ip-list" class="list"></div>
+        <div class="section-head">
+          <h2>Ayak izleri</h2>
+          <button id="toggle-trail" class="pill glass">Ayrintili goster</button>
+        </div>
+        <div id="trail" class="list hidden"></div>
+        <div class="section-head"><h2>Engellenenler</h2></div>
+        <div id="blocked-list" class="list"></div>
+      </div>
+    </main>
+
+    <nav class="tabbar glass">
+      <button id="menu-open" class="menu-open glass" aria-label="Menu">&#9776;</button>
+      <button id="add-btn" class="fab" aria-label="Kisi ekle">+</button>
+    </nav>
+  </section>
+
+  <dialog id="main-menu" class="sheet">
+    <div class="sheet-body form">
+      <div class="sheet-grip"></div>
+      <h2>Menu</h2>
+      <div class="graph-menu-list">
+        <button type="button" class="glass" data-m="contacts">Kisiler</button>
+        <button type="button" class="glass" data-m="graph">Iliski haritasi</button>
+<button type="button" class="glass" data-m="map">Harita</button>
+        <button type="button" class="glass" data-m="summary">Ozet</button>
+        <button type="button" class="glass" data-m="security">Guvenlik</button>
+        <button type="button" class="glass" data-m="settings">Ayarlar</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="map-dialog" class="sheet">
+<div class="sheet-body form">
+<div class="sheet-grip"></div>
+<h2>Harita</h2>
+<p class="muted">Sehir alanina gore kisi konumlari. Harita karolari OpenStreetMap sunucularindan yuklenir.</p>
+<div id="map-box" style="height:360px;width:100%;border-radius:12px;overflow:hidden"></div>
+<div id="map-list" style="margin-top:12px"></div>
+<div style="margin-top:12px"><button type="button" id="map-close" class="glass">Kapat</button></div>
+</div>
+</dialog>
+
+<div id="sel-bar" class="glass hidden" style="position:fixed;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom) + 90px);padding:10px;border-radius:16px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;z-index:20">
+<span id="sel-count" class="muted">0 secili</span>
+<button type="button" id="sel-group" class="glass">Gruba ata</button>
+<button type="button" id="sel-tag" class="glass">Etiket ekle</button>
+<button type="button" id="sel-merge" class="glass hidden">Birlestir</button>
+<button type="button" id="sel-trash" class="btn-danger">Cop kutusu</button>
+<button type="button" id="sel-cancel" class="glass">Iptal</button>
+</div>
+
+<dialog id="sessions-dialog" class="sheet">
+<div class="sheet-body form">
+<div class="sheet-grip"></div>
+<h2>Acik oturumlar</h2>
+<p class="muted">Bu cihaz disindaki oturumlari buradan kapatabilirsiniz.</p>
+<div id="sessions-list"></div>
+<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button type="button" id="sessions-all" class="btn-danger">Bu cihaz haric tumunu kapat</button><button type="button" id="sessions-close" class="glass">Kapat</button></div>
+</div>
+</dialog>
+
+<dialog id="trash-dialog" class="sheet">
+<div class="sheet-body form">
+<div class="sheet-grip"></div>
+<h2>Cop kutusu</h2>
+<p class="muted">Silinen kisiler 30 gun saklanir, sonra kalici olarak silinir.</p>
+<div id="trash-list"></div>
+<div style="margin-top:12px"><button type="button" id="trash-close" class="glass">Kapat</button></div>
+</div>
+</dialog>
+
+<dialog id="settings-dialog" class="sheet">
+    <div class="sheet-body form">
+      <div class="sheet-grip"></div>
+      <div class="section-title"><h2>Ayarlar</h2><button type="button" id="settings-close" class="pill glass small">Kapat</button></div>
+      <div class="set-stack">
+        <details class="set-group" open>
+          <summary>Hesap ve guvenlik</summary>
+          <div class="graph-menu-list">
+            <button type="button" id="passkey-add" class="glass">Parmak izi ekle (bu cihaz)</button>
+            <button type="button" id="passkey-manage" class="glass">Kayitli parmak izlerini yonet</button>
+            <button type="button" id="recovery-request" class="glass">Kurtarma kodunu e-postala</button>
+            <button type="button" id="sessions-open" class="glass">Acik oturumlar</button>
+            <button type="button" id="logout-btn" class="glass btn-danger">Cikis yap</button>
+          </div>
+        </details>
+        <details class="set-group">
+          <summary>Gorunum ve uygulama</summary>
+          <div class="graph-menu-list">
+            <button type="button" id="theme-btn" class="glass">Tema degistir (acik / koyu)</button>
+            <button type="button" id="install-app" class="glass hidden">Uygulama olarak yukle</button>
+          </div>
+        </details>
+        <details class="set-group">
+          <summary>Bildirimler</summary>
+          <div class="graph-menu-list">
+            <button type="button" id="notify-enable" class="glass">Dogum gunu bildirimlerini ac</button>
+            <button type="button" id="push-enable" class="glass">Bildirimleri ac</button>
+            <button type="button" id="push-test" class="glass">Test bildirimi gonder</button>
+          </div>
+        </details>
+        <details class="set-group">
+          <summary>Kisiler</summary>
+          <div class="graph-menu-list">
+            <button type="button" id="import-contacts" class="glass">Kisi ice aktar (.vcf / Google .csv)</button>
+            <button type="button" id="trash-open" class="glass">Cop kutusu (30 gun)</button>
+          </div>
+        </details>
+        <details class="set-group">
+          <summary>Yedek ve disa aktarim</summary>
+          <div class="graph-menu-list">
+            <button type="button" id="export-ics" class="glass">Dogum gunu takvimi (.ics)</button>
+            <button type="button" id="export-json" class="glass">Yedekle (JSON, sifresiz)</button>
+            <button type="button" id="export-csv" class="glass">Disa aktar (CSV, sifresiz)</button>
+          </div>
+        </details>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="summary-dialog" class="sheet">
+    <div class="sheet-body form">
+      <div class="sheet-grip"></div>
+      <div class="section-title"><h2>Ozet</h2><button type="button" id="summary-close" class="pill glass small">Kapat</button></div>
+      <div id="summary-box"></div>
+    </div>
+  </dialog>
+
+  <dialog id="graph-dialog" class="sheet graph-sheet">
+    <div class="sheet-body form">
+      <div class="graph-top">
+        <h2>Iliski haritasi</h2>
+        <button type="button" id="graph-close" class="pill glass small">Kapat</button>
+      </div>
+      <div id="graph-box" class="graph-box"></div>
+      <div class="graph-bar">
+        <button type="button" id="graph-menu-btn" class="pill glass" aria-label="Harita menusu">&#9776; Menu</button>
+        <span class="meta">Parmakla kaydir, iki parmakla buyut</span>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="graph-menu" class="sheet">
+    <div class="sheet-body form">
+      <div class="sheet-grip"></div>
+      <h2>Harita ayarlari</h2>
+      <div class="graph-menu-list">
+        <button type="button" class="glass" data-g="in">Yakinlastir</button>
+        <button type="button" class="glass" data-g="out">Uzaklastir</button>
+        <button type="button" class="glass" data-g="reset">Tam gorunum</button>
+        <button type="button" class="glass" data-g="labels" id="menu-labels">Etiketleri goster</button>
+        <button type="button" class="glass" data-g="lock" id="menu-lock">Haritayi kilitle</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="view-dialog" class="sheet">
+    <div id="view-body" class="sheet-body"></div>
+  </dialog>
+
+  <dialog id="bulk-dialog" class="sheet">
+    <div class="sheet-body form">
+      <div class="sheet-grip"></div>
+      <h2>Toplu iliski</h2>
+      <p class="muted">Secili kisi ile asagidaki kisiler arasinda tek seferde iliski kurulur.</p>
+
+      <fieldset>
+        <legend>Iliski turu</legend>
+        <select id="bulk-preset"></select>
+        <div class="row2">
+          <label>Secilen kisiler, bu kisinin:<input id="bulk-label" maxlength="60"></label>
+          <label>Bu kisi, onlarin:<input id="bulk-reverse" maxlength="60"></label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Kisi sec</legend>
+        <select id="bulk-group"></select>
+        <div class="pick-tools">
+          <span id="bulk-count" class="meta">0 kisi secili</span>
+          <button type="button" id="bulk-all" class="pill glass small">Tumunu sec</button>
+          <button type="button" id="bulk-none" class="pill glass small">Temizle</button>
+        </div>
+        <div id="bulk-list" class="pick-list"></div>
+      </fieldset>
+
+      <p id="bulk-error" class="error" role="alert"></p>
+      <div class="form-actions">
+        <button type="button" id="bulk-cancel" class="btn-ghost">Vazgec</button>
+        <button type="button" id="bulk-confirm" class="btn-primary">Onayla</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="contact-dialog" class="sheet">
+    <form id="contact-form" method="dialog" class="sheet-body form">
+      <div class="sheet-grip"></div>
+      <h2 id="dialog-title">Yeni kisi</h2>
+
+      <fieldset>
+        <legend>Kimlik</legend>
+        <div class="row2">
+          <label>Isim *<input name="first_name" required maxlength="100"></label>
+          <label>Soyisim<input name="last_name" maxlength="100"></label>
+        </div>
+        <label>Takma ad<input name="nickname" maxlength="60"></label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Dogum</legend>
+        <div class="row3">
+          <label>Yil<input name="birth_year" type="number" min="1900" placeholder="2006"></label>
+          <label>Ay<input name="birth_month" type="number" min="1" max="12"></label>
+          <label>Gun<input name="birth_day" type="number" min="1" max="31"></label>
+        </div>
+        <label>Dogum yeri<input name="birthplace" maxlength="100"></label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Yasam ve okul</legend>
+        <div class="row2">
+          <label>Sehir<input list="city-options" name="city" maxlength="100">
+<div id="city-preview" style="height:160px;border-radius:12px;overflow:hidden;margin:6px 0"></div>
+<p id="city-preview-note" class="muted" style="font-size:12px;margin:0"></p></label>
+          <label>Grup / sinif<input name="group_name" maxlength="60" placeholder="Sinif 8/LF"></label>
+        </div>
+        <div class="row2">
+          <label>Okul<input name="school" maxlength="120"></label>
+          <label>Meslek<input name="occupation" maxlength="100"></label>
+        </div>
+        <label>Nasil tanistik<textarea name="how_we_met" rows="2" maxlength="500"></textarea></label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Iletisim</legend>
+        <div class="row2">
+          <label>Telefon<input name="phone" type="tel" maxlength="30"></label>
+          <label>E-posta<input name="email" type="email" maxlength="254"></label>
+        </div>
+        <label>Web sitesi<input name="website" type="url" maxlength="300" placeholder="https://..."></label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Sosyal medya</legend>
+        <div id="socials-list"></div>
+        <button type="button" id="add-social" class="pill glass small">+ Hesap ekle</button>
+      </fieldset>
+
+      <fieldset>
+        <legend>Ozel alanlar</legend>
+        <p class="meta">Ek telefon, ozel tarih, hobi, kisa not... istediginiz bilgiyi ekleyin.</p>
+        <div id="extra-list"></div>
+        <button type="button" id="add-extra" class="pill glass small">+ Alan ekle</button>
+      </fieldset>
+
+      <label>Etiketler<input name="tags" maxlength="300" placeholder="aile, is, spor"></label>
+      <label>Notlar<textarea name="notes" rows="3" maxlength="5000"></textarea></label>
+
+      <p id="form-error" class="error" role="alert"></p>
+      <div class="form-actions">
+        <button type="button" id="cancel-btn" class="btn-ghost">Iptal</button>
+        <button type="submit" class="btn-primary">Kaydet</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="reauth-dialog" class="sheet">
+    <form id="reauth-form" class="sheet-body form">
+      <div class="sheet-grip"></div>
+      <h2>Sifrenizi tekrar girin</h2>
+      <p class="muted">Bu hassas bir islem. Devam etmek icin sifrenizi ve konum izninizi onaylayin.</p>
+      <input type="password" id="reauth-password" placeholder="Sifre" autocomplete="current-password" required>
+      <p id="reauth-error" class="error" role="alert"></p>
+      <div class="form-actions">
+        <button type="button" id="reauth-cancel" class="btn-ghost">Vazgec</button>
+        <button type="submit" class="btn-primary">Onayla</button>
+      </div>
+    </form>
+  </dialog>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin=""></script>
+  <script src="/crypto.js"></script>
+  <script src="/push.js" defer></script>
+<script src="/passkey.js" defer></script>
+<script src="/recovery.js" defer></script>
+<script src="/app.js" defer></script>
+  <script src="/signup.js" defer></script>
+  <script src="/i18n.js" defer></script>
+</body>
+</html>
