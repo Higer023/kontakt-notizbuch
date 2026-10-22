@@ -1,4 +1,4 @@
-<p align="center">
+<p align="center">\n  <img src="https://raw.githubusercontent.com/Higer23/kontakt-notizbuch/main/public/icon.svg" alt="Kontakt-Notizbuch logo" width="96">\n</p>\n\n<p align="center">
   <strong>Language / Sprache / Dil:</strong>
   <a href="#english">English</a> · <a href="#türkçe">Türkçe</a> · <a href="#deutsch">Deutsch</a>
 </p>
