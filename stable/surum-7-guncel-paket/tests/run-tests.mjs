@@ -5,6 +5,7 @@ const ROOT = path.resolve(new URL('..', import.meta.url).pathname);
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 
+// ---- D1-ähnliche Datenbank (echtes SQLite, Python-Brücke) ----
 // ---- D1 benzeri veritabani (gercek SQLite, Python koprusu) ----
 const py = spawn('python3', [path.join(ROOT, 'tests', 'd1.py')], { stdio: ['pipe', 'pipe', 'inherit'] });
 let nextId = 1, buf = '';
@@ -48,6 +49,7 @@ await DB.prepare("INSERT INTO login_logs (ip, success, event, user_agent, finger
 await DB.prepare("INSERT INTO login_logs (ip, success, event, user_agent, fingerprint) VALUES ('9.9.9.9', 0, 'login', 'ua-test', NULL)").bind().run();
 await DB.prepare("INSERT INTO blocked_ips (ip) VALUES ('8.8.8.8')").bind().run();
 
+// ---- Ergebnisverfolgung ----
 // ---- Sonuc takibi ----
 let pass = 0, fail = 0;
 async function check(name, fn) {
@@ -58,6 +60,7 @@ const eq = (a, b, msg) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw n
 const ok = (c, msg) => { if (!c) throw new Error(msg || 'kosul saglanmadi'); };
 
 // ---- Worker ----
+// ---- Worker ----
 const workerSrc = fs.readFileSync(path.join(ROOT, 'src', 'worker.js'), 'utf8');
 const worker = (await import('data:text/javascript,' + encodeURIComponent(workerSrc))).default;
 const env = { DB, TURNSTILE_SECRET: 'test', LOG_KEY: crypto.randomBytes(32).toString('base64'), ASSETS: { fetch: async () => new Response('x') } };
@@ -66,6 +69,7 @@ const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 await DB.prepare("INSERT INTO sessions (token_hash, expires_at, reauth_until) VALUES (?, datetime('now','+1 hour'), datetime('now','+5 minutes'))").bind(sha('tok1')).run();
 await DB.prepare("INSERT INTO sessions (token_hash, expires_at, reauth_until) VALUES (?, datetime('now','+1 hour'), NULL)").bind(sha('tok2')).run();
 
+// Alte Klartextdaten (für Migrationstests)
 // Eski duz metin veri (gecis testi icin)
 await DB.prepare("INSERT INTO contacts (id, first_name, last_name, group_name, birth_year, socials, extra, tags, notes) VALUES (1,'Ali','Yilmaz','Sinif 8',2008,?, '[]','aile','not')").bind(JSON.stringify([{ platform: 'instagram', username: 'ali' }])).run();
 await DB.prepare("INSERT INTO contacts (id, first_name, last_name, socials, extra) VALUES (2,'Ayse','Kaya','[]','[]')").bind().run();
@@ -118,6 +122,7 @@ await check('gecis verisi listelenir (3 kisi, 2 iliski)', async () => {
 await check('gecersiz id ile import reddedilir', async () =>
   eq((await call('POST', '/api/vault/import', { records: [{ id: 'abc', payload: 'x' }], final: false }, 'tok1')).status, 400));
 
+// ---- Tests für den Client (app.js): echter Code, simuliertes DOM ----
 // ---- Istemci (app.js) testleri: gercek kod, sahte DOM ----
 function stub() {
   const target = function () {};
@@ -134,6 +139,7 @@ function stub() {
 let SESSION = null;
 globalThis.window = stub();
 globalThis.document = stub();
+// esc() benötigt das Browser-DOM: Simuliere in der Testumgebung dasselbe Escape-Verhalten
 // esc() tarayici DOM'u ister: test ortaminda ayni kacis davranisini taklit et
 document.createElement = () => {
   let txt = '';
