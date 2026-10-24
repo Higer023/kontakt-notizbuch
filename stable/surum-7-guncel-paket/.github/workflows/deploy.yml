@@ -1,0 +1,70 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Static tests and syntax checks
+        run: node tests/static.test.mjs
+      - name: Dependencies (tests/)
+        run: cd tests && npm install --no-audit --no-fund
+      - name: Behavioral tests (mock D1)
+        run: node tests/behavior.test.mjs
+      - name: Client encryption regression tests
+        run: node tests/crypto.test.mjs
+      - name: CSV formula injection regression tests
+        run: node tests/csv.test.mjs
+
+  deploy:
+    needs: test
+    name: deploy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate Cloudflare deployment secrets
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CF_API_TOKEN:-}" ]; then
+            echo "::error::Missing repository secret CLOUDFLARE_API_TOKEN. Add it in Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          if [ -z "${CF_ACCOUNT_ID:-}" ]; then
+            echo "::error::Missing repository secret CLOUDFLARE_ACCOUNT_ID. Add it in Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+      - name: Apply D1 schema (idempotent)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4.151.3'
+          command: d1 execute kontakt-db --remote --file=schema.sql
+      - name: Deploy Worker and static assets
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4.151.3'
+          command: deploy

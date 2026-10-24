@@ -1,0 +1,36 @@
+name: Automation failure report
+on:
+  workflow_run:
+    workflows:
+      - Deploy
+      - Automatic Sync to Higer023
+      - Quality Gate
+    types: [completed]
+permissions:
+  actions: read
+  contents: read
+jobs:
+  report-failure:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'timed_out' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Add concise failure summary to GitHub Actions
+        env:
+          RUN_NAME: ${{ github.event.workflow_run.name }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          {
+            echo "## ❌ Otomasyon başarısız"
+            echo
+            echo "- **Workflow:** ${RUN_NAME}"
+            echo "- **Sonuç:** ${CONCLUSION}"
+            echo "- **Dal:** ${BRANCH}"
+            echo "- **Commit:** ${SHA:0:7}"
+            echo "- **Ayrıntılar:** ${RUN_URL}"
+            echo
+            echo "Discord bildirimi, tekrar mesaj göndermemek için merkezi kısa durum raporuna bırakıldı."
+          } >> "$GITHUB_STEP_SUMMARY"

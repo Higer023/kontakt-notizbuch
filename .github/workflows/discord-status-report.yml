@@ -1,0 +1,55 @@
+name: Discord Sync Status Report
+on:
+  workflow_run:
+    workflows:
+      - "Automatic Sync to Higer023"
+      - "Deploy"
+    types: [completed]
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+concurrency:
+  group: discord-status-report-${{ github.event.workflow_run.id || github.run_id }}
+  cancel-in-progress: false
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Send one concise status message to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          REPO: ${{ github.repository }}
+          RUN_NAME: ${{ github.event.workflow_run.name || 'Manual Discord notification test' }}
+          RUN_STATUS: ${{ github.event.workflow_run.conclusion || 'manual_test' }}
+          RUN_URL: ${{ github.event.workflow_run.html_url || format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${DISCORD_WEBHOOK_URL:-}" ]]; then
+            echo "::error::GitHub Actions secret DISCORD_WEBHOOK_URL is missing."
+            exit 1
+          fi
+          python - <<'PY' > /tmp/payload.json
+          import json, os
+          status = os.environ['RUN_STATUS']
+          if status == 'success':
+              title, color, summary = '✅ İşlem başarılı', 3066993, 'Workflow başarıyla tamamlandı.'
+          elif status in ('failure', 'cancelled', 'timed_out'):
+              title, color, summary = '❌ İşlem başarısız', 15158332, 'Workflow başarısız oldu, iptal edildi veya zaman aşımına uğradı.'
+          else:
+              title, color, summary = 'ℹ️ İşlem durumu: ' + status, 15844367, 'Sonuç: ' + status
+          repo = os.environ['REPO']
+          sha = os.environ['HEAD_SHA'][:7]
+          links = f"[İşlem ayrıntısı]({os.environ['RUN_URL']}) · [Kaynak Actions](https://github.com/{repo}/actions) · [Hedef commitler](https://github.com/Higer023/kontakt-notizbuch/commits/main)"
+          description = f"**{summary}**\n{os.environ['RUN_NAME']} · `{os.environ['HEAD_BRANCH']}` · `{sha}`\n{links}"
+          print(json.dumps({'username':'Higer Sync Monitor','allowed_mentions':{'parse':[]},'embeds':[{'title':title,'description':description,'color':color,'footer':{'text':'kontakt-notizbuch · kısa otomasyon bildirimi'}}]}))
+          PY
+          curl --fail --silent --show-error --retry 2 --retry-delay 1 \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/payload.json \
+            "$DISCORD_WEBHOOK_URL" >/dev/null
+          echo "Discord kısa durum bildirimi gönderildi."
