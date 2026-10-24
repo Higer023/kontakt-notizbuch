@@ -5,6 +5,7 @@ const PLATFORMS = [
   ['reddit', 'Reddit'], ['twitch', 'Twitch'], ['threads', 'Threads'], ['bluesky', 'Bluesky'], ['medium', 'Medium'],
 ];
 
+// 25 vordefinierte Beziehungen: [diese Person, Gegenüber] – ist die Beziehung für die ausgewählte Person „Mutter“, ist das Gegenüber „Kind“
 // 25 hazir iliski: [bu kisi, karsi taraf] - secilen kisi icin "annesi" ise karsi taraf "cocugu"
 const PRESETS = [
   ['annesi', 'cocugu'], ['babasi', 'cocugu'], ['kardesi', 'kardesi'], ['teyzesi', 'yegeni'],
@@ -42,6 +43,7 @@ function presetOptions() {
     + '<option value="-1">Ozel (kendiniz yazin)</option>';
 }
 
+// ---------- Netzwerkschicht ----------
 // ---------- Ag katmani ----------
 
 async function api(path, options = {}, retried = false) {
@@ -65,13 +67,16 @@ async function api(path, options = {}, retried = false) {
   return data;
 }
 
+// ---------- Standortberechtigung (erforderlich) ----------
 // ---------- Konum izni (zorunlu) ----------
 
+// Der Standort wird nicht mehr abgefragt; Anmeldung und Registrierung erfolgen ohne Standort
 // Konum artik istenmez; giris ve kayit konum olmadan yapilir
 function getGeo() {
   return Promise.resolve(null);
 }
 
+// Geräte- und Browserinformationen (Fingerprint)
 // Cihaz ve tarayici bilgileri (ayak izi)
 async function getFingerprint(geo) {
   const fp = {
@@ -121,6 +126,7 @@ async function getFingerprint(geo) {
   return fp;
 }
 
+// ---------- Erneute Authentifizierung ----------
 // ---------- Yeniden dogrulama ----------
 
 function requestReauth() {
@@ -156,6 +162,7 @@ $('#reauth-dialog').addEventListener('close', () => {
   }
 });
 
+// ---------- Bei Inaktivität abmelden (15 Min.) ----------
 // ---------- Bosta kalinca oturumu kapat (15 dk) ----------
 
 const IDLE_MS = 15 * 60 * 1000;
@@ -191,12 +198,14 @@ async function idleLogout() {
   showLogin('Uzun sure islem yapilmadigi icin oturum kapatildi.');
 }
 
+// ---------- Anmeldung ----------
 // ---------- Giris ----------
 
 function showLogin(message = '') {
   stopIdle();
   Vault.lock();
   records.clear();
+  // Geöffnete Menüs/Dialoge sollen nicht über dem Anmeldebildschirm liegen
   // Acik menu/diyaloglar giris ekraninin ustunde kalmasin
   for (const id of ['main-menu', 'settings-dialog', 'summary-dialog', 'graph-dialog', 'graph-menu', 'view-dialog', 'contact-dialog', 'bulk-dialog', 'reauth-dialog']) {
     const d = document.getElementById(id);
@@ -244,6 +253,7 @@ $('#logout-btn').addEventListener('click', async () => {
   showLogin();
 });
 
+// ---------- Hauptmenü (Hamburger-Menü in der unteren Leiste): Kontakte, IH, Übersicht, Sicherheit, Einstellungen ----------
 // ---------- Ana menu (alt bar hamburger): Kisiler, IH, Ozet, Guvenlik, Ayarlar ----------
 $('#menu-open').addEventListener('click', () => $('#main-menu').showModal());
 $('#main-menu').addEventListener('click', (e) => {
@@ -259,6 +269,7 @@ $('#main-menu').addEventListener('click', (e) => {
 });
 $('#settings-close').addEventListener('click', () => $('#settings-dialog').close());
 
+// ---------- Tabs ----------
 // ---------- Sekmeler ----------
 
 document.querySelectorAll('.tab[data-tab]').forEach((btn) => {
@@ -275,6 +286,7 @@ function switchTab(tab) {
   window.scrollTo({ top: 0 });
 }
 
+// ---------- Verschlüsselte Daten (werden im Browser entschlüsselt) ----------
 // ---------- Sifreli veri (tarayicida cozulur) ----------
 
 const SOCIAL_URL = {
@@ -297,6 +309,7 @@ const USER_RE = /^[A-Za-z0-9._-]{1,100}$/;
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/;
 const PHONE_RE = /^[+0-9 ()-]{0,30}$/;
 
+// Entschlüsselte Datensätze: id -> { id, data }. Der Server sieht diese Daten nicht.
 // Cozulmus kayitlar: id -> { id, data }. Sunucu bu veriyi gormez.
 const records = new Map();
 
@@ -387,6 +400,7 @@ function computeAge(d) {
   return age;
 }
 
+// Ansichtsmodell: Beziehungen werden bidirektional berechnet
 // Gorunum modeli: iliskiler iki yonlu hesaplanir
 function buildViews() {
   const views = new Map();
@@ -424,6 +438,7 @@ function viewById(id) {
   return buildViews().find((c) => c.id === id);
 }
 
+// ---------- Passwortentschlüsselung, Übergang, Registrierung ----------
 // ---------- Sifre cozme, gecis, kayit ----------
 
 async function loadRecords() {
@@ -434,6 +449,7 @@ async function loadRecords() {
   }
 }
 
+// Verschlüsselt und schreibt alte Klartextdatensätze einmalig (IDs bleiben erhalten)
 // Eski duz metin kayitlari bir kez sifreleyip yazar (ids korunur)
 async function migrateLegacy() {
   const legacy = await api('/api/vault/legacy');
@@ -527,6 +543,7 @@ async function removeRelation(entry) {
   await persist(entry.owner, { ...rec.data, relations: rels });
 }
 
+// ---------- Kontakte ----------
 // ---------- Kisiler ----------
 
 async function loadContacts() {
@@ -619,6 +636,7 @@ $('#search').addEventListener('input', () => {
 });
 $('#group-filter').addEventListener('change', () => loadContacts().catch(alertError));
 
+// ---------- Überprüfung ----------
 // ---------- Inceleme ----------
 
 async function openView(id) {
@@ -748,6 +766,7 @@ $('#view-body').addEventListener('submit', async (e) => {
   } catch (err) { alertError(err); }
 });
 
+// ---------- Massenbeziehung ----------
 // ---------- Toplu iliski ----------
 
 function openBulk() {
@@ -822,6 +841,7 @@ $('#bulk-confirm').addEventListener('click', async () => {
   }
 });
 
+// ---------- Hinzufügen / Bearbeiten ----------
 // ---------- Ekleme / duzenleme ----------
 
 function addSocialRow(platform = 'instagram', username = '') {
@@ -885,6 +905,7 @@ $('#contact-form').addEventListener('submit', async (e) => {
   try {
     const data = buildFormData(e.target);
     validate(data);
+    // Beim Bearbeiten bleiben bestehende Beziehungen erhalten
     // Duzenlemede mevcut iliskiler korunur
     data.relations = editingId ? (records.get(editingId)?.data.relations || []) : [];
     await persist(editingId, data);
@@ -895,6 +916,7 @@ $('#contact-form').addEventListener('submit', async (e) => {
   }
 });
 
+// ---------- Sicherheit ----------
 // ---------- Guvenlik ----------
 
 function deviceName(ua = '') {
@@ -997,7 +1019,9 @@ function alertError(err) {
 }
 
 
+// ---------- Karte (Leaflet + OpenStreetMap): Standort anhand des Stadtfelds ----------
 // ---------- Harita (Leaflet + OpenStreetMap): sehir alanina gore konum ----------
+// Standorte werden nicht an den Server übertragen; sie werden nur im Browser anhand des Stadtnamens zugeordnet.
 // Konumlar sunucuya gitmez; sadece tarayicida, sehir adina gore eslestirilir.
 const CITY_COORDS = {
   istanbul: [41.0082, 28.9784], ankara: [39.9334, 32.8597], izmir: [38.4237, 27.1428],
@@ -1023,6 +1047,7 @@ function cityKey(value) {
 
 let mapInstance = null;
 
+// Kartenfenster: Wenn keine lokale Tabelle vorhanden ist, wird Photon NUR nach dem Stadtnamen gefragt (es wird kein Name übermittelt). Ergebnisse werden im Arbeitsspeicher gehalten.
 // Harita penceresi: yerel tablo yoksa Photon'a SADECE sehir metni sorulur (isim gitmez). Sonuclar bellekte.
 const mapCityCache = new Map();
 let mapLayer = null, mapRun = 0;
@@ -1108,8 +1133,10 @@ async function openMap() {
 }
 $('#map-close').addEventListener('click', () => $('#map-dialog').close());
 
+// ---------- Übersicht, Design, Beziehungsdiagramm ----------
 // ---------- Ozet, tema, iliski haritasi ----------
 
+// Zusammenfassung: alle Statistiken und Durchschnittswerte (über die Zusammenfassungsschaltfläche oben links)
 // Ozet: tum istatistikler ve ortalamalar (sol ustteki Ozet dugmesinde)
 function summaryHtml(all) {
   const n = all.length;
@@ -1149,6 +1176,7 @@ function openSummary() {
 }
 $('#summary-close').addEventListener('click', () => $('#summary-dialog').close());
 
+// SVG-Netzwerk aus Personen mit Beziehungen. Gibt null zurück, wenn keine Beziehung vorhanden ist.
 // Iliskisi olan kisilerden SVG agi. Iliski yoksa null doner.
 const GRAPH_SIZE = 600;
 let graphW = GRAPH_SIZE;
@@ -1195,7 +1223,9 @@ function graphSvg(all) {
     }
   }
 
+  // Textanordnung: zuerst die Knotennamen, danach die Beziehungsbeschriftungen.
   // Yazi yerlesimi: once dugume ait isimler, sonra iliski etiketleri.
+  // Jede Beschriftung wird platziert, sofern sie nicht mit bereits platzierten Beschriftungen oder Kreisen kollidiert.
   // Her yazi, daha once yerlesmis yazi ve dairelerle cakismiyorsa konur.
   const placed = [];
   const boxOf = (x, y, text, size) => {
@@ -1226,6 +1256,7 @@ function graphSvg(all) {
       const bx = boxOf(x, y, e.label, 10);
       if (!clash(bx)) { placed.push(bx); edgeText.push({ x, y, label: e.label }); break; }
     }
+    // Wenn keine Position gefunden wird, wird die Beschriftung ausgeblendet; die Linie wird trotzdem gezeichnet
     // Yer bulunamazsa etiket gizlenir; cizgi yine de cizilir
   }
 
@@ -1253,6 +1284,7 @@ function applyGraphView() {
   svg.classList.toggle('show-labels', graphLabelsOn());
 }
 
+// Wandelt einen Bildschirmpunkt in Kartenkoordinaten um
 // Ekran noktasini harita koordinatina cevirir
 function gScreenToSvg(clientX, clientY) {
   const svg = document.querySelector('#graph-box svg');
@@ -1300,6 +1332,7 @@ $('#graph-dialog').addEventListener('close', () => { document.body.style.overflo
 
 const gBox = $('#graph-box');
 
+// Mit dem Mausrad auf die Position des Cursors zoomen (Desktop)
 // Tekerlek ile imlec noktasina yakinlastirma (masaustu)
 gBox.addEventListener('wheel', (e) => {
   if (graphLocked || !document.querySelector('#graph-box svg')) return;
@@ -1328,6 +1361,7 @@ gBox.addEventListener('pointermove', (e) => {
   const rect = svg.getBoundingClientRect();
 
   if (gPointers.size >= 2 && gPinch) {
+    // Zwei Finger: vergrößern/verkleinern + mit dem Mittelpunkt verschieben
     // Iki parmak: yakinlastir/uzaklastir + orta noktayla kaydir
     const [a, b] = [...gPointers.values()];
     const dist = Math.hypot(a.x - b.x, a.y - b.y);
@@ -1343,6 +1377,7 @@ gBox.addEventListener('pointermove', (e) => {
     return;
   }
 
+  // Ein Finger: scrollen
   // Tek parmak: kaydir
   const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
   gDist += Math.abs(dx) + Math.abs(dy);
@@ -1358,6 +1393,7 @@ const gEnd = (e) => {
 gBox.addEventListener('pointerup', gEnd);
 gBox.addEventListener('pointercancel', gEnd);
 
+// Wenn nicht verschoben oder gezoomt wurde, öffnet das Antippen eines Knotens die Person
 // Kaydirma/yakinlastirma olmadiysa dugume dokunmak kisiyi acar
 gBox.addEventListener('click', (e) => {
   if (gMoved) return;
@@ -1367,6 +1403,7 @@ gBox.addEventListener('click', (e) => {
   openView(id);
 });
 
+// Menü der unteren Leiste (Hamburger-Menü)
 // Alt bar menusu (hamburger)
 $('#graph-menu-btn').addEventListener('click', () => {
   refreshGraphMenu();
@@ -1387,6 +1424,7 @@ function applyTheme(theme) {
   if (theme === 'light') document.documentElement.dataset.theme = 'light';
   else delete document.documentElement.dataset.theme;
 }
+// Wenn der Speicher blockiert ist (in einigen Inkognito-Modi), wird die Anwendung trotzdem geöffnet
 // Depolama engelliyse (bazi gizli modlar) uygulama yine acilir
 function savedTheme() {
   try { return localStorage.getItem('theme'); } catch { return null; }
@@ -1406,6 +1444,7 @@ api('/api/me').then(() => {
   else showLogin('Sifreli verileriniz icin tekrar giris yapin.');
 }).catch(() => showLogin());
 
+// ---------- Sicherung: JSON- und CSV-Export (Einstellungen) ----------
 // ---------- Yedekleme: JSON ve CSV disa aktarma (Ayarlar) ----------
 function downloadText(text, name, type) {
   const url = URL.createObjectURL(new Blob([text], { type }));
@@ -1426,7 +1465,9 @@ function exportJson() {
 }
 function csvCell(value) {
   let s = value == null ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value);
+  // Verhindere die Ausführung von Tabellenformeln, wenn exportierte Daten in Excel/Sheets geöffnet werden.
   // Prevent spreadsheet formula execution when exported data is opened in Excel/Sheets.
+  // Stelle Texten, die mit einer Formel beginnen (einschließlich vorangestellter Leer- oder Steuerzeichen), ein Apostroph voran.
   // Prefix formula-leading text (including whitespace/control prefixes) with an apostrophe.
   if (/^[\u0000-\u0020]*[=+@-]/.test(s)) s = "'" + s;
   return /[\",\r\n;]/.test(s) ? `\"${s.replace(/\"/g, '\"\"')}\"` : s;
@@ -1441,11 +1482,13 @@ function exportCsv() {
 $('#export-json').addEventListener('click', exportJson);
 $('#export-csv').addEventListener('click', exportCsv);
 
+// ---------- PWA: Nur das App-Shell wird im Cache gespeichert (KEINE Kontaktdaten) ----------
 // ---------- PWA: sadece uygulama kabugu onbellege alinir (kisi verisi DEGIL) ----------
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
+// ---------- Standort: 81 Provinzen (Autovervollständigung + Karte) ----------
 // ---------- Konum: 81 il (otomatik tamamlama + harita) ----------
 const TR_PROVINCES = [["Adana", 37.0, 35.3213], ["Adıyaman", 37.7648, 38.2786], ["Afyonkarahisar", 38.7638, 30.5403], ["Ağrı", 39.7191, 43.0503], ["Aksaray", 38.3687, 34.037], ["Amasya", 40.6499, 35.8353], ["Ankara", 39.9334, 32.8597], ["Antalya", 36.8969, 30.7133], ["Ardahan", 41.1105, 42.7022], ["Artvin", 41.1828, 41.8183], ["Aydın", 37.856, 27.8416], ["Balıkesir", 39.6484, 27.8826], ["Bartın", 41.6344, 32.3375], ["Batman", 37.8812, 41.1351], ["Bayburt", 40.2552, 40.2249], ["Bilecik", 40.142, 29.9793], ["Bingöl", 38.8855, 40.498], ["Bitlis", 38.4006, 42.1095], ["Bolu", 40.7392, 31.6089], ["Burdur", 37.7203, 30.2908], ["Bursa", 40.195, 29.06], ["Çanakkale", 40.1553, 26.4142], ["Çankırı", 40.6013, 33.6134], ["Çorum", 40.5506, 34.9556], ["Denizli", 37.7765, 29.0864], ["Diyarbakır", 37.9144, 40.2306], ["Düzce", 40.8438, 31.1565], ["Edirne", 41.6818, 26.5623], ["Elazığ", 38.681, 39.2264], ["Erzincan", 39.75, 39.5], ["Erzurum", 39.9043, 41.2679], ["Eskişehir", 39.7767, 30.5206], ["Gaziantep", 37.0662, 37.3833], ["Giresun", 40.9128, 38.3895], ["Gümüşhane", 40.4386, 39.5086], ["Hakkari", 37.5744, 43.7408], ["Hatay", 36.2023, 36.16], ["Iğdır", 39.9237, 44.045], ["Isparta", 37.7648, 30.5566], ["İstanbul", 41.0082, 28.9784], ["İzmir", 38.4237, 27.1428], ["Kahramanmaraş", 37.5858, 36.9371], ["Karabük", 41.2061, 32.6204], ["Karaman", 37.1759, 33.2287], ["Kars", 40.6013, 43.0975], ["Kastamonu", 41.3887, 33.7827], ["Kayseri", 38.7312, 35.4787], ["Kilis", 36.7184, 37.1212], ["Kırıkkale", 39.8468, 33.5153], ["Kırklareli", 41.7333, 27.2167], ["Kırşehir", 39.1425, 34.1709], ["Kocaeli", 40.8533, 29.8815], ["Konya", 37.8746, 32.4932], ["Kütahya", 39.4167, 29.9833], ["Malatya", 38.3552, 38.3095], ["Manisa", 38.6191, 27.4289], ["Mardin", 37.3212, 40.7245], ["Mersin", 36.8121, 34.6415], ["Muğla", 37.2153, 28.3636], ["Muş", 38.7432, 41.5064], ["Nevşehir", 38.6939, 34.6857], ["Niğde", 37.9667, 34.6833], ["Ordu", 40.9839, 37.8764], ["Osmaniye", 37.0746, 36.2464], ["Rize", 41.0201, 40.5234], ["Sakarya", 40.7569, 30.3783], ["Samsun", 41.2867, 36.33], ["Siirt", 37.9333, 41.95], ["Sinop", 42.0231, 35.1531], ["Sivas", 39.7477, 37.0179], ["Şanlıurfa", 37.1591, 38.7969], ["Şırnak", 37.5164, 42.4611], ["Tekirdağ", 40.9781, 27.5117], ["Tokat", 40.3167, 36.55], ["Trabzon", 41.0027, 39.7168], ["Tunceli", 39.1079, 39.5401], ["Uşak", 38.6823, 29.4082], ["Van", 38.4891, 43.4089], ["Yalova", 40.65, 29.2667], ["Yozgat", 39.8181, 34.8147], ["Zonguldak", 41.4564, 31.7987]];
 for (const [name, lat, lng] of TR_PROVINCES) CITY_COORDS[cityKey(name)] = [lat, lng];
@@ -1455,6 +1498,7 @@ for (const [name, lat, lng] of TR_PROVINCES) CITY_COORDS[cityKey(name)] = [lat, 
   dl.innerHTML = TR_PROVINCES.map(([name]) => `<option value="${esc(name)}"></option>`).join('');
 })();
 
+// ---------- Standort: deutsche Städte (große und mittelgroße) ----------
 // ---------- Konum: Alman sehirleri (buyuk ve orta olcekli) ----------
 const DE_CITIES = [["Berlin", 52.52, 13.405], ["Hamburg", 53.5511, 9.9937], ["München", 48.1351, 11.582], ["Köln", 50.9375, 6.9603], ["Frankfurt am Main", 50.1109, 8.6821], ["Stuttgart", 48.7758, 9.1829], ["Düsseldorf", 51.2277, 6.7735], ["Leipzig", 51.3397, 12.3731], ["Dortmund", 51.5136, 7.4653], ["Essen", 51.4556, 7.0116], ["Bremen", 53.0793, 8.8017], ["Dresden", 51.0504, 13.7373], ["Hannover", 52.3759, 9.732], ["Nürnberg", 49.4521, 11.0767], ["Duisburg", 51.4344, 6.7623], ["Bochum", 51.4818, 7.2162], ["Wuppertal", 51.2562, 7.1508], ["Bielefeld", 52.0302, 8.5325], ["Bonn", 50.7374, 7.0982], ["Münster", 51.9607, 7.6261], ["Karlsruhe", 49.0069, 8.4037], ["Mannheim", 49.4875, 8.466], ["Augsburg", 48.3705, 10.8978], ["Wiesbaden", 50.0826, 8.24], ["Gelsenkirchen", 51.5177, 7.0857], ["Mönchengladbach", 51.1805, 6.4428], ["Braunschweig", 52.2689, 10.5268], ["Chemnitz", 50.8278, 12.9214], ["Kiel", 54.3233, 10.1228], ["Aachen", 50.7753, 6.0839], ["Halle (Saale)", 51.4969, 11.9688], ["Magdeburg", 52.1205, 11.6276], ["Freiburg im Breisgau", 47.999, 7.8421], ["Krefeld", 51.3388, 6.5853], ["Lübeck", 53.8655, 10.6866], ["Oberhausen", 51.4963, 6.8638], ["Erfurt", 50.9787, 11.0328], ["Mainz", 49.9929, 8.2473], ["Rostock", 54.0924, 12.0991], ["Kassel", 51.3127, 9.4797], ["Hagen", 51.3671, 7.4636], ["Hamm", 51.6809, 7.8144], ["Saarbrücken", 49.2402, 6.9969], ["Mülheim an der Ruhr", 51.4269, 6.8825], ["Potsdam", 52.3906, 13.0645], ["Ludwigshafen", 49.4774, 8.4452], ["Oldenburg", 53.1435, 8.2146], ["Leverkusen", 51.0459, 6.985], ["Osnabrück", 52.2799, 8.0472], ["Solingen", 51.1652, 7.0671], ["Heidelberg", 49.3988, 8.6724], ["Herne", 51.5386, 7.2254], ["Neuss", 51.1981, 6.688], ["Darmstadt", 49.8728, 8.6512], ["Paderborn", 51.7189, 8.7575], ["Regensburg", 49.0134, 12.1016], ["Ingolstadt", 48.7665, 11.4258], ["Würzburg", 49.7913, 9.9534], ["Fürth", 49.4771, 10.9887], ["Wolfsburg", 52.4227, 10.7865], ["Offenbach am Main", 50.1006, 8.7658], ["Ulm", 48.4011, 9.9876], ["Heilbronn", 49.1427, 9.2109], ["Pforzheim", 48.8922, 8.6944], ["Göttingen", 51.5413, 9.9158], ["Trier", 49.7596, 6.6441], ["Reutlingen", 48.4919, 9.204], ["Bremerhaven", 53.5396, 8.5809], ["Koblenz", 50.3569, 7.589], ["Jena", 50.9278, 11.5892], ["Erlangen", 49.5897, 11.0078], ["Siegen", 50.8748, 8.0243], ["Hildesheim", 52.1502, 9.951], ["Cottbus", 51.7606, 14.3344], ["Zwickau", 50.7189, 12.4964], ["Schwerin", 53.6355, 11.4012], ["Gera", 50.8833, 12.0833], ["Dessau", 51.8278, 12.245], ["Salzgitter", 52.1537, 10.3399], ["Bottrop", 51.5236, 6.9288], ["Recklinghausen", 51.614, 7.1975], ["Bergisch Gladbach", 50.9914, 7.1344], ["Remscheid", 51.179, 7.1896], ["Moers", 51.4506, 6.6269], ["Konstanz", 47.6779, 9.1732], ["Passau", 48.5667, 13.4316], ["Bamberg", 49.8988, 10.9028], ["Tübingen", 48.5216, 9.0576], ["Lüneburg", 53.2466, 10.4084], ["Flensburg", 54.7937, 9.4459], ["Greifswald", 54.0865, 13.3923], ["Weimar", 50.9795, 11.3235], ["Gießen", 50.5836, 8.6784], ["Marburg", 50.8102, 8.7709], ["Görlitz", 51.1545, 14.9882], ["Stralsund", 54.3093, 13.0819], ["Emden", 53.367, 7.2058], ["Wilhelmshaven", 53.5278, 8.1063], ["Bayreuth", 49.9456, 11.5713], ["Kaiserslautern", 49.4401, 7.7491], ["Frankfurt", 50.1109, 8.6821], ["Halle", 51.4969, 11.9688], ["Freiburg", 47.999, 7.8421], ["Offenbach", 50.1006, 8.7658], ["Mülheim", 51.4269, 6.8825], ["Muenchen", 48.1351, 11.582]];
 for (const [name, lat, lng] of DE_CITIES) CITY_COORDS[cityKey(name)] = [lat, lng];
@@ -1465,6 +1509,7 @@ for (const [name, lat, lng] of DE_CITIES) CITY_COORDS[cityKey(name)] = [lat, lng
   dl.innerHTML += DE_CITIES.filter(([n]) => seen.has(n)).map(([name]) => `<option value="${esc(name)}"></option>`).join('');
 })();
 
+// ---------- Standort: Umgebung von Wetzlar und Verden (ungefähre Koordinaten) ----------
 // ---------- Konum: Wetzlar ve Verden cevresi (yaklasik koordinatlar) ----------
 const REGION_CITIES = [["Wetzlar", 50.5526, 8.5047], ["Aßlar", 50.6172, 8.3658], ["Solms", 50.4956, 8.4247], ["Braunfels", 50.5236, 8.3614], ["Leun", 50.5, 8.3333], ["Ehringshausen", 50.6, 8.4], ["Lahnau", 50.6, 8.6], ["Hüttenberg", 50.6, 8.5], ["Herborn", 50.6847, 8.3088], ["Dillenburg", 50.7393, 8.2904], ["Haiger", 50.7237, 8.2118], ["Waldsolms", 50.42, 8.45], ["Biebertal", 50.65, 8.6], ["Greifenstein", 50.6, 8.2], ["Butzbach", 50.4325, 8.6679], ["Weilburg", 50.4837, 8.2658], ["Limburg an der Lahn", 50.3867, 8.0592], ["Lollar", 50.5222, 8.6297], ["Hungen", 50.4, 8.8], ["Wettenberg", 50.6, 8.68], ["Langgöns", 50.5, 8.7], ["Heuchelheim", 50.6, 8.7], ["Pohlheim", 50.6, 8.8], ["Reiskirchen", 50.5, 8.8], ["Schöffengrund", 50.5, 8.5], ["Sinn", 50.6, 8.4], ["Runkel", 50.4, 8.1], ["Verden", 52.9231, 9.2328], ["Achim", 53.0213, 9.0236], ["Oyten", 53.0, 8.99], ["Dörverden", 52.8, 9.2], ["Kirchlinteln", 52.9, 9.4], ["Langwedel", 52.8, 9.3], ["Thedinghausen", 52.9, 8.9], ["Ottersberg", 53.1, 9.1], ["Rethem", 52.8, 9.5], ["Hodenhagen", 52.9, 9.7], ["Walsrode", 52.8, 9.6], ["Syke", 52.9, 8.8], ["Weyhe", 52.99, 8.8], ["Eystrup", 52.8, 9.2]];
 for (const [name, lat, lng] of REGION_CITIES) CITY_COORDS[cityKey(name)] = [lat, lng];
@@ -1474,7 +1519,9 @@ for (const [name, lat, lng] of REGION_CITIES) CITY_COORDS[cityKey(name)] = [lat,
   dl.innerHTML += REGION_CITIES.map(([name]) => `<option value="${esc(name)}"></option>`).join('');
 })();
 
+// ---------- Live-Standortvorschau im Kontaktformular ----------
 // ---------- Kisi formunda canli konum onizlemesi ----------
+// 1) Zuerst die lokale Tabelle (keine Anfrage an einen externen Dienst). 2) Falls nicht vorhanden, wird nach Abschluss des Schreibvorgangs NUR der Ortsname an Photon gesendet.
 // 1) Once yerel tablo (dis servise gitmez). 2) Yoksa, yazma bitince Photon'a SADECE yer metni gider.
 (function livePreview() {
   const input = document.querySelector('input[name="city"]');
@@ -1502,6 +1549,7 @@ for (const [name, lat, lng] of REGION_CITIES) CITY_COORDS[cityKey(name)] = [lat,
   async function geocodeRemote(q) {
     const key = cityKey(q);
     if (remoteCache.has(key)) return remoteCache.get(key);
+    // Es wird nur der Standorttext gesendet. Es werden keine Anmeldedaten, Cookies oder Referrer-Informationen gesendet.
     // Sadece yer metni gonderilir. Kimlik bilgisi, cerez veya referans bilgisi gonderilmez.
     const res = await fetch('https://photon.komoot.io/api/?limit=1&q=' + encodeURIComponent(q), {
       credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store',
@@ -1541,6 +1589,7 @@ for (const [name, lat, lng] of REGION_CITIES) CITY_COORDS[cityKey(name)] = [lat,
   input.addEventListener('change', update);
 })();
 
+// ---------- Schnellaktionen (Detailfenster): Anrufen, Nachricht, E-Mail ----------
 // ---------- Hizli eylemler (detay penceresi): ara, mesaj, e-posta ----------
 function quickActions(c) {
   const tel = c.phone ? String(c.phone).replace(/[^\d+]/g, '') : '';
@@ -1553,6 +1602,7 @@ function quickActions(c) {
   return parts.length ? `<div class="chips">${parts.join('')}</div>` : '';
 }
 
+// ---------- Geburtstagserinnerung (Übersicht + .ics) ----------
 // ---------- Dogum gunu hatirlatici (ozet + .ics) ----------
 function nextBirthday(c, today) {
   if (!c.birth_month || !c.birth_day) return null;
@@ -1599,6 +1649,7 @@ function exportBirthdaysIcs() {
 }
 $('#export-ics').addEventListener('click', exportBirthdaysIcs);
 
+// ---------- Kontakte importieren: vCard (.vcf) und Google Kontakte CSV ----------
 // ---------- Kisi ice aktarma: vCard (.vcf) ve Google Kisiler CSV ----------
 function parseBday(s) {
   s = String(s || '').trim();
@@ -1691,6 +1742,7 @@ function toImportRecord(p) {
     socials: [], extra: [], notes: cut(p.notes, 5000), tags: '', relations: [],
   };
 }
+// Schlüssel, um das erneute Hinzufügen derselben Person zu verhindern (letzte 9 Ziffern der Telefonnummer, E-Mail, Vor- und Nachname)
 // Ayni kisinin tekrar eklenmesini onlemek icin anahtarlar (telefon son 9 hane, e-posta, ad+soyad)
 function contactKeys(c) {
   const keys = [];
@@ -1702,6 +1754,7 @@ function contactKeys(c) {
   return keys;
 }
 
+// Mehrere Dateien: zuerst eine Übersicht, dann die Bestätigung. Duplikate (bereits vorhandene und innerhalb der Datei) werden übersprungen.
 // Birden fazla dosya: once ozet, sonra onay. Yinelenenler (mevcut ve dosya ici) atlanir.
 async function importContactsFiles(files) {
   const parsed = [];
@@ -1754,6 +1807,7 @@ $('#import-contacts').addEventListener('click', () => {
   input.click();
 });
 
+// ---------- Mögliche Duplikate (werden nur aufgelistet, nicht zusammengeführt) ----------
 // ---------- Olasi yinelenen kayitlar (sadece listeler; birlestirmez) ----------
 function duplicatesHtml() {
   const groups = new Map();
@@ -1785,6 +1839,7 @@ function duplicatesHtml() {
     + '<p class="muted">Ayni telefon, e-posta ya da ad-soyad eslesmesine gore listelenir. Birlestirmek icin secim modunu acip iki kisi secin ve birlestirme dugmesine basin.</p>';
 }
 
+// ---------- Erweiterter Filter: Stadt und Tag ----------
 // ---------- Gelismis filtre: sehir ve etiket ----------
 function renderFilters(all) {
   const fill = (sel, values, label) => {
@@ -1802,6 +1857,7 @@ function renderFilters(all) {
 $('#city-filter').addEventListener('change', () => loadContacts().catch(alertError));
 $('#tag-filter').addEventListener('change', () => loadContacts().catch(alertError));
 
+// ---------- Papierkorb: Soft-Delete; nach 30 Tagen endgültig ----------
 // ---------- Cop kutusu: silme yumusak; 30 gun sonra kalici ----------
 const TRASH_DAYS = 30;
 async function trashContact(id) {
@@ -1857,6 +1913,7 @@ $('#trash-open').addEventListener('click', () => {
 });
 $('#trash-close').addEventListener('click', () => $('#trash-dialog').close());
 
+// ---------- Als App installieren (PWA-Installation) ----------
 // ---------- Uygulama olarak yukleme (PWA kurulumu) ----------
 let deferredInstallPrompt = null;
 window.addEventListener('beforeinstallprompt', (e) => {
@@ -1876,6 +1933,7 @@ window.addEventListener('appinstalled', () => {
   $('#install-app').classList.add('hidden');
 });
 
+// ---------- Mehrfachauswahl (8): Gruppe zuweisen, Tag hinzufügen, Papierkorb, zusammenführen (9) ----------
 // ---------- Toplu secim (8): gruba ata, etiket ekle, cop kutusu, birlestir (9) ----------
 let selMode = false;
 const selected = new Set();
@@ -1939,6 +1997,7 @@ $('#sel-trash').addEventListener('click', async () => {
   } catch (err) { alertError(err); }
 });
 
+// Zusammenführen (9): Datensatz S wird zu P verschoben; Beziehungen werden auf P umgeleitet; S wird in den Papierkorb verschoben.
 // Birlestirme (9): S kaydi P'ye tasinir; iliskiler P'ye yonlenir; S cop kutusuna gider.
 function mergeData(P, S, pid, sid) {
   const out = { ...P };
@@ -1980,6 +2039,7 @@ $('#sel-merge').addEventListener('click', async () => {
   } catch (err) { alertError(err); }
 });
 
+// ---------- Aktive Sitzungen (13) ----------
 // ---------- Acik oturumlar (13) ----------
 function deviceLabel(ua) {
   const u = String(ua || '');
@@ -2017,6 +2077,7 @@ $('#sessions-all').addEventListener('click', async () => {
 });
 $('#sessions-close').addEventListener('click', () => $('#sessions-dialog').close());
 
+// ---------- Geburtstagsbenachrichtigung (10): nur bei geöffneter App; kein Name im Text ----------
 // ---------- Dogum gunu bildirimi (10): sadece uygulama acikken; metinde isim yok ----------
 async function checkBirthdayNotice() {
   try {
@@ -2049,6 +2110,7 @@ $('#notify-enable').addEventListener('click', async () => {
 setTimeout(checkBirthdayNotice, 4000);
 setInterval(checkBirthdayNotice, 60 * 60 * 1000);
 
+// ---------- Push-Warteschlange: Anzahl der Geburtstage innerhalb der nächsten 7 Tage (nur die Zahl) ----------
 // ---------- Push kuyrugu: 7 gun icindeki dogum gunu sayisi (sadece sayi) ----------
 function queueBirthdayDigest() {
   try {

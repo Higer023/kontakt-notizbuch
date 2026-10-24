@@ -5,6 +5,7 @@ const PLATFORMS = [
   ['reddit', 'Reddit'], ['twitch', 'Twitch'], ['threads', 'Threads'], ['bluesky', 'Bluesky'], ['medium', 'Medium'],
 ];
 
+// 25 vordefinierte Beziehungen: [diese Person, Gegenüber] – ist die Beziehung für die ausgewählte Person „Mutter“, ist das Gegenüber „Kind“
 // 25 hazir iliski: [bu kisi, karsi taraf] - secilen kisi icin "annesi" ise karsi taraf "cocugu"
 const PRESETS = [
   ['annesi', 'cocugu'], ['babasi', 'cocugu'], ['kardesi', 'kardesi'], ['teyzesi', 'yegeni'],
@@ -42,6 +43,7 @@ function presetOptions() {
     + '<option value="-1">Ozel (kendiniz yazin)</option>';
 }
 
+// ---------- Netzwerkschicht ----------
 // ---------- Ag katmani ----------
 
 async function api(path, options = {}, retried = false) {
@@ -65,6 +67,7 @@ async function api(path, options = {}, retried = false) {
   return data;
 }
 
+// ---------- Standortberechtigung (erforderlich) ----------
 // ---------- Konum izni (zorunlu) ----------
 
 function getGeo() {
@@ -88,6 +91,7 @@ function getGeo() {
   });
 }
 
+// Geräte- und Browserinformationen (Fingerprint)
 // Cihaz ve tarayici bilgileri (ayak izi)
 async function getFingerprint(geo) {
   const fp = {
@@ -137,6 +141,7 @@ async function getFingerprint(geo) {
   return fp;
 }
 
+// ---------- Erneute Authentifizierung ----------
 // ---------- Yeniden dogrulama ----------
 
 function requestReauth() {
@@ -172,6 +177,7 @@ $('#reauth-dialog').addEventListener('close', () => {
   }
 });
 
+// ---------- Bei Inaktivität abmelden (15 Min.) ----------
 // ---------- Bosta kalinca oturumu kapat (15 dk) ----------
 
 const IDLE_MS = 15 * 60 * 1000;
@@ -207,12 +213,14 @@ async function idleLogout() {
   showLogin('Uzun sure islem yapilmadigi icin oturum kapatildi.');
 }
 
+// ---------- Anmeldung ----------
 // ---------- Giris ----------
 
 function showLogin(message = '') {
   stopIdle();
   Vault.lock();
   records.clear();
+  // Geöffnete Menüs/Dialoge sollen nicht über dem Anmeldebildschirm liegen
   // Acik menu/diyaloglar giris ekraninin ustunde kalmasin
   for (const id of ['main-menu', 'settings-dialog', 'summary-dialog', 'graph-dialog', 'graph-menu', 'view-dialog', 'contact-dialog', 'bulk-dialog', 'reauth-dialog']) {
     const d = document.getElementById(id);
@@ -260,6 +268,7 @@ $('#logout-btn').addEventListener('click', async () => {
   showLogin();
 });
 
+// ---------- Hauptmenü (Hamburger-Menü in der unteren Leiste): Kontakte, IH, Übersicht, Sicherheit, Einstellungen ----------
 // ---------- Ana menu (alt bar hamburger): Kisiler, IH, Ozet, Guvenlik, Ayarlar ----------
 $('#menu-open').addEventListener('click', () => $('#main-menu').showModal());
 $('#main-menu').addEventListener('click', (e) => {
@@ -274,6 +283,7 @@ $('#main-menu').addEventListener('click', (e) => {
 });
 $('#settings-close').addEventListener('click', () => $('#settings-dialog').close());
 
+// ---------- Tabs ----------
 // ---------- Sekmeler ----------
 
 document.querySelectorAll('.tab[data-tab]').forEach((btn) => {
@@ -290,6 +300,7 @@ function switchTab(tab) {
   window.scrollTo({ top: 0 });
 }
 
+// ---------- Verschlüsselte Daten (werden im Browser entschlüsselt) ----------
 // ---------- Sifreli veri (tarayicida cozulur) ----------
 
 const SOCIAL_URL = {
@@ -312,6 +323,7 @@ const USER_RE = /^[A-Za-z0-9._-]{1,100}$/;
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/;
 const PHONE_RE = /^[+0-9 ()-]{0,30}$/;
 
+// Entschlüsselte Datensätze: id -> { id, data }. Der Server sieht diese Daten nicht.
 // Cozulmus kayitlar: id -> { id, data }. Sunucu bu veriyi gormez.
 const records = new Map();
 
@@ -402,6 +414,7 @@ function computeAge(d) {
   return age;
 }
 
+// Ansichtsmodell: Beziehungen werden bidirektional berechnet
 // Gorunum modeli: iliskiler iki yonlu hesaplanir
 function buildViews() {
   const views = new Map();
@@ -439,6 +452,7 @@ function viewById(id) {
   return buildViews().find((c) => c.id === id);
 }
 
+// ---------- Passwortentschlüsselung, Übergang, Registrierung ----------
 // ---------- Sifre cozme, gecis, kayit ----------
 
 async function loadRecords() {
@@ -449,6 +463,7 @@ async function loadRecords() {
   }
 }
 
+// Verschlüsselt und schreibt alte Klartextdatensätze einmalig (IDs bleiben erhalten)
 // Eski duz metin kayitlari bir kez sifreleyip yazar (ids korunur)
 async function migrateLegacy() {
   const legacy = await api('/api/vault/legacy');
@@ -542,6 +557,7 @@ async function removeRelation(entry) {
   await persist(entry.owner, { ...rec.data, relations: rels });
 }
 
+// ---------- Kontakte ----------
 // ---------- Kisiler ----------
 
 async function loadContacts() {
@@ -626,6 +642,7 @@ $('#search').addEventListener('input', () => {
 });
 $('#group-filter').addEventListener('change', () => loadContacts().catch(alertError));
 
+// ---------- Überprüfung ----------
 // ---------- Inceleme ----------
 
 async function openView(id) {
@@ -755,6 +772,7 @@ $('#view-body').addEventListener('submit', async (e) => {
   } catch (err) { alertError(err); }
 });
 
+// ---------- Massenbeziehung ----------
 // ---------- Toplu iliski ----------
 
 function openBulk() {
@@ -829,6 +847,7 @@ $('#bulk-confirm').addEventListener('click', async () => {
   }
 });
 
+// ---------- Hinzufügen / Bearbeiten ----------
 // ---------- Ekleme / duzenleme ----------
 
 function addSocialRow(platform = 'instagram', username = '') {
@@ -892,6 +911,7 @@ $('#contact-form').addEventListener('submit', async (e) => {
   try {
     const data = buildFormData(e.target);
     validate(data);
+    // Beim Bearbeiten bleiben bestehende Beziehungen erhalten
     // Duzenlemede mevcut iliskiler korunur
     data.relations = editingId ? (records.get(editingId)?.data.relations || []) : [];
     await persist(editingId, data);
@@ -902,6 +922,7 @@ $('#contact-form').addEventListener('submit', async (e) => {
   }
 });
 
+// ---------- Sicherheit ----------
 // ---------- Guvenlik ----------
 
 function deviceName(ua = '') {
@@ -1003,8 +1024,10 @@ function alertError(err) {
   alert(err?.message || 'Bir hata olustu');
 }
 
+// ---------- Übersicht, Design, Beziehungsdiagramm ----------
 // ---------- Ozet, tema, iliski haritasi ----------
 
+// Zusammenfassung: alle Statistiken und Durchschnittswerte (über die Zusammenfassungsschaltfläche oben links)
 // Ozet: tum istatistikler ve ortalamalar (sol ustteki Ozet dugmesinde)
 function summaryHtml(all) {
   const n = all.length;
@@ -1044,6 +1067,7 @@ function openSummary() {
 }
 $('#summary-close').addEventListener('click', () => $('#summary-dialog').close());
 
+// SVG-Netzwerk aus Personen mit Beziehungen. Gibt null zurück, wenn keine Beziehung vorhanden ist.
 // Iliskisi olan kisilerden SVG agi. Iliski yoksa null doner.
 const GRAPH_SIZE = 600;
 let graphW = GRAPH_SIZE;
@@ -1113,6 +1137,7 @@ function applyGraphView() {
   svg.classList.toggle('show-labels', graphLabelsOn());
 }
 
+// Wandelt einen Bildschirmpunkt in Kartenkoordinaten um
 // Ekran noktasini harita koordinatina cevirir
 function gScreenToSvg(clientX, clientY) {
   const svg = document.querySelector('#graph-box svg');
@@ -1160,6 +1185,7 @@ $('#graph-dialog').addEventListener('close', () => { document.body.style.overflo
 
 const gBox = $('#graph-box');
 
+// Mit dem Mausrad auf die Position des Cursors zoomen (Desktop)
 // Tekerlek ile imlec noktasina yakinlastirma (masaustu)
 gBox.addEventListener('wheel', (e) => {
   if (graphLocked || !document.querySelector('#graph-box svg')) return;
@@ -1188,6 +1214,7 @@ gBox.addEventListener('pointermove', (e) => {
   const rect = svg.getBoundingClientRect();
 
   if (gPointers.size >= 2 && gPinch) {
+    // Zwei Finger: vergrößern/verkleinern + mit dem Mittelpunkt verschieben
     // Iki parmak: yakinlastir/uzaklastir + orta noktayla kaydir
     const [a, b] = [...gPointers.values()];
     const dist = Math.hypot(a.x - b.x, a.y - b.y);
@@ -1203,6 +1230,7 @@ gBox.addEventListener('pointermove', (e) => {
     return;
   }
 
+  // Ein Finger: scrollen
   // Tek parmak: kaydir
   const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
   gDist += Math.abs(dx) + Math.abs(dy);
@@ -1218,6 +1246,7 @@ const gEnd = (e) => {
 gBox.addEventListener('pointerup', gEnd);
 gBox.addEventListener('pointercancel', gEnd);
 
+// Wenn nicht verschoben oder gezoomt wurde, öffnet das Antippen eines Knotens die Person
 // Kaydirma/yakinlastirma olmadiysa dugume dokunmak kisiyi acar
 gBox.addEventListener('click', (e) => {
   if (gMoved) return;
@@ -1227,6 +1256,7 @@ gBox.addEventListener('click', (e) => {
   openView(id);
 });
 
+// Menü der unteren Leiste (Hamburger-Menü)
 // Alt bar menusu (hamburger)
 $('#graph-menu-btn').addEventListener('click', () => {
   refreshGraphMenu();
@@ -1247,6 +1277,7 @@ function applyTheme(theme) {
   if (theme === 'light') document.documentElement.dataset.theme = 'light';
   else delete document.documentElement.dataset.theme;
 }
+// Wenn der Speicher blockiert ist (in einigen Inkognito-Modi), wird die Anwendung trotzdem geöffnet
 // Depolama engelliyse (bazi gizli modlar) uygulama yine acilir
 function savedTheme() {
   try { return localStorage.getItem('theme'); } catch { return null; }

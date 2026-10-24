@@ -1,3 +1,4 @@
+// Kontoerstellung und Wiederherstellung: Benutzername + Passwort + Fingerabdruck + Wiederherstellungscode.
 // Hesap olusturma ve kurtarma: kullanici adi + parola + parmak izi + kurtarma kodu.
 (function () {
   const $ = (sel) => document.querySelector(sel);
@@ -34,6 +35,7 @@
     return data;
   }
 
+  // Wandelt Browser-Fehlernamen in verständliche Texte für den Benutzer um
   // Tarayici hata adlarini kullaniciya anlasilir metne cevirir
   function friendly(err) {
     if (err && err.name === 'NotAllowedError') return 'Parmak izi islemi iptal edildi veya zaman asimina ugradi.';
@@ -48,6 +50,7 @@
     return n;
   }
 
+  // ---------- Registrierungsfenster ----------
   // ---------- Kayit penceresi ----------
 
   function buildSignupDialog() {
@@ -70,6 +73,7 @@
     return dlg;
   }
 
+  // Der Wiederherstellungscode wird einmal angezeigt; die Registrierung wird erst abgeschlossen, wenn der Benutzer bestätigt
   // Kurtarma kodu bir kez gosterilir; kullanici onaylayana kadar kayit tamamlanmaz
   function showRecoveryCode(code) {
     return new Promise((resolve, reject) => {
@@ -120,12 +124,14 @@
       },
     });
 
+    // Wiederherstellungscode: Das Passwort wird mit dem Code verschlüsselt; der Server speichert nur den Hash des Codes und das verschlüsselte Passwort
     // Kurtarma kodu: parola kodla sifrelenir; sunucu yalnizca kodun ozetini ve sifreli parolayi tutar
     const code = window.RecoveryCrypto.newCode();
     const blob = await window.RecoveryCrypto.wrapPassword(code, password);
     const codeHash = await sha256Hex(window.RecoveryCrypto.normalize(code));
 
     $('#su-error').textContent = '';
+    // Der Code wird nicht auf dem Bildschirm angezeigt, sondern nur an die E-Mail-Adresse gesendet
     // Kod ekranda gosterilmez; yalnizca e-posta adresine gonderilir
     $('#su-error').textContent = 'Kurtarma kodu e-posta adresinize gonderiliyor...';
 
@@ -145,6 +151,7 @@
     await unlockVault(password);
   }
 
+  // ---------- Fenster zur Wiederherstellungsanmeldung ----------
   // ---------- Kurtarma girisi penceresi ----------
 
   function buildRecoveryDialog() {
@@ -180,12 +187,14 @@
     try {
       await unlockVault(password);
     } catch (e) {
+      // Die Serversitzung abmelden, wenn der Tresor nicht geöffnet werden konnte
       // Kasa acilamadiysa sunucu oturumunu kapat
       await post('/api/logout', {}).catch(() => {});
       throw e;
     }
   }
 
+  // ---------- Verbindung ----------
   // ---------- Baglanti ----------
 
   function bind() {
@@ -264,6 +273,7 @@
     });
   }
 
+  // Im Einstellungsfenster: neuer Wiederherstellungscode (Passwort + E-Mail)
   // Ayarlar penceresinde: yeni kurtarma kodu (parola + e-posta)
   function initSettingsRecovery() {
     const sd = document.getElementById('settings-dialog');

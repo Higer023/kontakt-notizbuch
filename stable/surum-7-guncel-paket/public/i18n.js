@@ -1,4 +1,6 @@
+// Sprachunterstützung: tr, en, de, ar. Bei der ersten Anmeldung wird die Sprache anhand der Browsersprache ausgewählt; sie lässt sich oben rechts ändern,
 // Dil destegi: tr, en, de, ar. Ilk giriste tarayici diline gore secilir; sag ustten degistirilir,
+// Wird bei der Anmeldung zu den Einstellungen verschoben. Der Übersetzungsschlüssel ist der türkische Quelltext.
 // giris yapildiginda ayarlara tasinir. Ceviri anahtari Turkce kaynak metindir.
 (function () {
   const LANGS = { tr: 'Türkçe', en: 'English', de: 'Deutsch', ar: 'العربية' };

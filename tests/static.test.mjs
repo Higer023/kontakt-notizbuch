@@ -1,3 +1,4 @@
+// Statische Tests, die vor dem Deployment ausgeführt werden. Vom Repo-Stammverzeichnis aus: node tests/static.test.mjs
 // Dagitimdan once calisan statik testler. Repo kokunden: node tests/static.test.mjs
 import { readFileSync, readdirSync, writeFileSync, mkdtempSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';

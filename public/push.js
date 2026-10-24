@@ -1,3 +1,4 @@
+// Benachrichtigungsabo: wird über das Einstellungsmenü aktiviert. Kein Text, nur ein Abonnementeintrag.
 // Bildirim aboneligi: ayarlar menusunden acilir. Metin yok, yalnizca abonelik kaydi.
 (function () {
   function msg(t) { alert(t); }
@@ -53,6 +54,7 @@
     if (testBtn) testBtn.addEventListener('click', () => test().catch((e) => msg(e.message)));
   }
 
+  // Während die Anwendung geöffnet ist, wird die Anzahl der bevorstehenden Geburtstage in die Serverwarteschlange geschrieben (nur die Zahl, keine Namen).
   // Uygulama acikken yaklasan dogum gunu sayisini sunucu kuyruguna yazar (sadece sayi, isim yok).
   window.rehberQueue = function (type, count) {
     if (!('Notification' in window) || Notification.permission !== 'granted') return;

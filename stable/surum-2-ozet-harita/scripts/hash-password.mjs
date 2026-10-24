@@ -1,3 +1,4 @@
+// Verwendung: node scripts/hash-password.mjs "en-az-12-karakterli-sifre"
 // Kullanim: node scripts/hash-password.mjs "en-az-12-karakterli-sifre"
 const password = process.argv[2];
 if (!password || password.length < 12) {

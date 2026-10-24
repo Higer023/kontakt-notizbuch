@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS relations (
 CREATE INDEX IF NOT EXISTS idx_relations_from ON relations (from_id);
 CREATE INDEX IF NOT EXISTS idx_relations_to ON relations (to_id);
 
+-- Verschlüsselte Daten (clientseitiges AES-GCM). Alle Anweisungen sind idempotent.
 -- Sifreli veri (istemci tarafli AES-GCM). Tum ifadeler idempotent.
 CREATE TABLE IF NOT EXISTS vault (
   id INTEGER PRIMARY KEY CHECK (id = 1),
