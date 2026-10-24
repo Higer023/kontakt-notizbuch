@@ -1,4 +1,6 @@
+// Clientseitige Verschlüsselung (AES-GCM). Der Schlüssel wird aus Ihrem Passwort abgeleitet,
 // Istemci tarafli sifreleme (AES-GCM). Anahtar parolanizdan turetilir,
+// Wird nur im Arbeitsspeicher gehalten; nicht auf dem Server oder auf der Festplatte gespeichert.
 // yalnizca bellekte tutulur; sunucuya veya diske yazilmaz.
 (function () {
   const ITER = 310000;
