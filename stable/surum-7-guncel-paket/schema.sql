@@ -1,4 +1,6 @@
+-- Kanonisches Schema. Kann wiederholt ausgeführt werden (IF NOT EXISTS). Wird bei jedem Deployment angewendet.
 -- Kanonik sema. Tekrar calistirilabilir (IF NOT EXISTS). Her dagitimda uygulanir.
+-- Eine neue Schemaänderung muss zuerst hier und im Ordner migrations/ eingetragen werden.
 -- Yeni bir sema degisikligi once buraya ve migrations/ klasorune islenmelidir.
 
 CREATE TABLE IF NOT EXISTS users (
@@ -55,6 +57,7 @@ CREATE TABLE IF NOT EXISTS vault (
   salt TEXT NOT NULL
 );
 
+-- Verschlüsselte Personendatensätze (clientseitiges AES-GCM); werden anhand von user_id dem jeweiligen Benutzer zugeordnet
 -- Sifreli kisi kayitlari (istemci tarafinda AES-GCM); user_id ile kullaniciya ayrilir
 CREATE TABLE IF NOT EXISTS encrypted_contacts (
   id INTEGER PRIMARY KEY,
@@ -64,6 +67,7 @@ CREATE TABLE IF NOT EXISTS encrypted_contacts (
 );
 CREATE INDEX IF NOT EXISTS idx_enc_contacts_user ON encrypted_contacts (user_id);
 
+-- Alte Klartexttabellen (für die Migration; es werden keine neuen Datensätze geschrieben)
 -- Eski acik metin tablolar (gecis icin; yeni kayit yazilmaz)
 CREATE TABLE IF NOT EXISTS contacts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
