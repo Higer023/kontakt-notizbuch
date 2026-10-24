@@ -1,3 +1,4 @@
+// Fingerabdruck (WebAuthn): Registrierung und Anmeldung. Die biometrischen Daten bleiben auf dem Gerät; nur die Signatur wird an den Server gesendet.
 // Parmak izi (WebAuthn): kayit ve giris. Biyometri cihazda kalir, sunucuya sadece imza gider.
 (function () {
   const $ = (sel) => document.querySelector(sel);
@@ -86,6 +87,7 @@
 
     $('#login-error').textContent = 'Parmak izi bekleniyor...';
     const opts = await postPlain('/api/passkey/login/options', {});
+    // Das Biometriefenster wird unmittelbar nach dem Klick des Benutzers geöffnet.
     // Biyometri penceresi kullanici tiklamasinin hemen ardindan acilir.
     const a = await navigator.credentials.get({
       publicKey: {
@@ -117,6 +119,7 @@
     try {
       await unlockVault(password);
     } catch (e) {
+      // Die Serversitzung abmelden, wenn der Tresor nicht geöffnet werden konnte
       // Kasa acilamadiysa sunucu oturumunu kapat
       await postPlain('/api/logout', {}).catch(() => {});
       throw e;

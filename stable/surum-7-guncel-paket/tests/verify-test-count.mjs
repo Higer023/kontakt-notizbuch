@@ -49,8 +49,10 @@ for (const suite of expectedSuites) {
   }
 
   const output = readFileSync(path.join(reportDir, file), 'utf8');
+  // Beide Ausgabeformate zählen: die benutzerdefinierte Ausgabe des Projekts "ok   description" und das standardmäßige TAP-Format "ok N - description".
   // Count both the project's custom "ok   description" output and standard TAP "ok N - description".
   const nodeChecks = (output.match(/^(?:ok\s{2,}\S|ok\s+\d+\s+-)/gm) || []).length;
+  // Python unittest stellt seiner Zusammenfassung „Ran N tests“ in CI-Logs einen Zeitstempel voran.
   // Python unittest prefixes its "Ran N tests" summary with a timestamp in CI logs.
   const pythonSummary = output.match(/Ran (\d+) tests?/i);
   const count = nodeChecks + (pythonSummary ? Number(pythonSummary[1]) : 0);

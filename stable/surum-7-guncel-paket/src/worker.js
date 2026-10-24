@@ -1,4 +1,5 @@
 // hjbbbjnbn
+// hjbbbjnbn
 const PBKDF2_ITER = 100000;
 const SESSION_HOURS = 8;
 const REAUTH_MINUTES = 5;
@@ -51,8 +52,10 @@ class HttpError extends Error {
 }
 
 export default {
+  // Tägliche Zusammenfassung: Wenn eine Warteschlange ausstehende Einträge enthält, wird eine leere Push-Nachricht an die Abonnenten gesendet.
   // Gunluk ozet: bekleyen kuyruk varsa abonelere bos push gonderilir.
   async scheduled(event, env, ctx) {
+    // Die Log-Aufbewahrung muss auch dann ausgeführt werden, wenn sich über längere Zeit niemand anmeldet.
     // Log retention must run even when nobody logs in for an extended period.
     ctx.waitUntil(cleanupExpiredLoginLogs(env).catch((err) => {
       console.error('login log retention cleanup failed', err);
@@ -125,6 +128,7 @@ async function handleApi(request, env, url) {
   if (pathname === '/api/recovery/rotate' && method === 'POST') { requireFresh(); return recoveryRotate(request, env); }
   if (pathname === '/api/user/recovery/rotate' && method === 'POST') { requireFresh(); return userRecoveryRotate(request, env, session); }
   if (pathname.startsWith('/api/push/')) return handlePush(request, env, url, { readJson, json, HttpError });
+  // Datensätze und IP-Liste sind verschlüsselt: Zum Lesen ist eine erneute Passworteingabe erforderlich
   // Kayitlar ve IP listesi sifreli: okumak icin yeniden parola gerekir
   if (pathname === '/api/logs' && method === 'GET') {
     requireFresh();
@@ -165,7 +169,9 @@ async function handleApi(request, env, url) {
   throw new HttpError(404, 'Bulunamadi');
 }
 
+// ---------- Verschlüsselter Tresor (clientseitiges AES-GCM) ----------
 // ---------- Sifreli kasa (istemci tarafli AES-GCM) ----------
+// Der Server speichert Personendaten nur als verschlüsselte Payload; der Entschlüsselungsschlüssel befindet sich im Browser.
 // Sunucu kisi verisini sadece sifreli payload olarak saklar; cozme anahtari tarayicidadir.
 
 const PAYLOAD_MAX = 50000;
@@ -198,6 +204,7 @@ async function vaultInit(request, env) {
   const body = await readJson(request);
   const salt = typeof body.salt === 'string' && body.salt.length >= 16 && body.salt.length <= 64 ? body.salt : null;
   if (!salt) throw new HttpError(400, 'Gecersiz tuz');
+  // Das zuerst gespeicherte Salt bleibt erhalten; bei späteren Anfragen wird dasselbe Salt zurückgegeben.
   // Ilk yazilan tuz kalir; sonraki isteklerde ayni tuz geri doner.
   await env.DB.prepare('INSERT OR IGNORE INTO vault (id, salt) VALUES (1, ?)').bind(salt).run();
   const row = await env.DB.prepare('SELECT salt FROM vault WHERE id = 1').first();
@@ -235,6 +242,7 @@ async function vaultDelete(env, id, uid) {
   return json({ ok: true });
 }
 
+// Aktualisiert/löscht mehrere Kontakte in einer einzigen atomaren Operation (für Beziehungen und Löschvorgänge)
 // Birden fazla kisiyi tek atomik islemde gunceller/siler (iliski ve silme icin)
 async function vaultBatch(request, env, fresh, uid) {
   const body = await readJson(request);
@@ -243,6 +251,7 @@ async function vaultBatch(request, env, fresh, uid) {
   if (puts.length + deletes.length === 0 || puts.length + deletes.length > VAULT_BATCH_MAX) {
     throw new HttpError(400, 'Gecersiz toplu islem');
   }
+  // Für den Löschvorgang ist eine erneute Authentifizierung erforderlich
   // Silme islemi icin yeniden dogrulama gerekir
   if (deletes.length && !fresh) throw new HttpError(428, 'Bu islem icin sifrenizi tekrar girin');
   const stmts = [
@@ -255,6 +264,7 @@ async function vaultBatch(request, env, fresh, uid) {
   return json({ ok: true });
 }
 
+// Alte Klartext-Personen (für die Migration, nur wenn sie noch nicht abgeschlossen ist)
 // Eski duz metin kisiler (gecis icin, yalnizca migrasyon bitmediyse)
 async function vaultLegacy(env) {
   if (await isMigrated(env)) throw new HttpError(409, 'Gecis zaten tamamlandi');
@@ -263,12 +273,14 @@ async function vaultLegacy(env) {
   return json({ contacts: contacts.results, relations: relations.results });
 }
 
+// Migration: Der Client verschlüsselt den Klartext und sendet ihn. Bei final=true wird sie nicht erneut ausgeführt.
 // Gecis: istemci duz metni sifreleyip gonderir. final=true olunca bir daha calismaz.
 async function vaultImport(request, env, uid) {
   if (await isMigrated(env)) throw new HttpError(409, 'Gecis zaten tamamlandi');
   const body = await readJson(request);
   const records = Array.isArray(body.records) ? body.records : [];
   if (records.length > VAULT_BATCH_MAX) throw new HttpError(400, 'Cok fazla kayit');
+  // Aktualisiert nur den Datensatz desselben Benutzers; der Datensatz eines anderen Benutzers wird nicht überschrieben.
   // Yalnizca ayni kullanicinin kaydini gunceller; baska kullanicinin kaydini ezmez.
   const stmts = records.map((r) => env.DB.prepare(
     "INSERT INTO encrypted_contacts (id, payload, user_id, updated_at) VALUES (?, ?, ?, datetime('now')) " +
@@ -282,7 +294,9 @@ async function vaultImport(request, env, uid) {
   return json({ imported: records.length, done: body.final === true }, 201);
 }
 
+// ---------- Anmeldeprotokolle: mit einem Serverschlüssel verschlüsselt, nicht umkehrbarer Suchcode für die IP ----------
 // ---------- Giris kayitlari: sunucu anahtariyla sifreli, IP icin geri okunamaz arama kodu ----------
+// LOG_KEY (Worker secret) -> Mit HKDF werden ein Verschlüsselungsschlüssel und ein Suchschlüssel abgeleitet.
 // LOG_KEY (Worker secret) -> HKDF ile sifreleme anahtari ve arama kodu anahtari turetilir.
 
 let logKeyCache = null;
@@ -324,7 +338,9 @@ async function openLog(env, sealed) {
   return JSON.parse(new TextDecoder().decode(pt));
 }
 
+// Verschiebt alte Klartext-Anmelde- und Sperrdatensätze in verschlüsselte Tabellen und löscht die alten Tabellen.
 // Eski duz metin giris ve engel kayitlarini sifreli tablolara tasir, eski tablolari siler.
+// Einmalig; der Vorgang erfolgt in einem einzigen Batch (alles oder nichts).
 // Tek seferlik; islem tek batch icinde (ya hepsi ya hicbiri).
 async function migrateSecurity(env) {
   const done = await env.DB.prepare("SELECT name FROM migrations WHERE name = 'logs_v2'").first();
@@ -359,6 +375,7 @@ async function migrateSecurity(env) {
   await dropLegacyContacts(env);
 }
 
+// Alte Klartext-Personentabellen: werden nur gelöscht, wenn für jede Person ein verschlüsseltes Gegenstück vorhanden ist
 // Eski duz metin kisi tablolari: yalnizca her kisinin sifreli karsiligi varsa silinir
 async function dropLegacyContacts(env) {
   const done = await env.DB.prepare("SELECT name FROM migrations WHERE name = 'legacy_drop'").first();
@@ -397,7 +414,9 @@ async function isBlocked(env, ip) {
   return !!row;
 }
 
+// Die Standortberechtigung ist erforderlich: Ohne Standort ist keine Anmeldung möglich
 // Konum izni zorunlu: konum yoksa giris yapilamaz
+// Der Standort ist nicht mehr erforderlich (Datenminimierung): Anmeldung und Registrierung sind ohne Standort möglich
 // Konum artik zorunlu degil (veri minimizasyonu): giris ve kayit konum olmadan yapilabilir
 function hasGeo() {
   return true;
@@ -425,6 +444,7 @@ function footprintJson(request, clientFp) {
   return JSON.stringify({ client, server }).slice(0, 7000);
 }
 
+// Datenminimierung: Der rohe Fingerabdruck wird nicht gespeichert; es werden nur eine Geräte- und eine Browser-Zusammenfassung aufbewahrt. Die Datensätze werden nach 90 Tagen gelöscht.
 // Veri azaltma: ham parmak izi saklanmaz, yalnizca cihaz ve tarayici ozeti tutulur. Kayitlar 90 gun sonra silinir.
 const LOG_RETENTION_DAYS = 90;
 function deviceSummary(ua) {
@@ -441,8 +461,10 @@ async function cleanupExpiredLoginLogs(env) {
 }
 
 async function recordFootprint(env, request, ip, event, success, clientFp) {
+  // clientFp wird absichtlich nicht verwendet: Der vom Client stammende rohe Fingerabdruck wird nicht mehr gespeichert.
   // clientFp bilerek kullanilmaz: istemciden gelen ham parmak izi artik kaydedilmez.
   const fullUa = (request.headers.get('User-Agent') || '').slice(0, 300);
+  // Die Zusammenfassung wird aus dem vollständigen UA extrahiert (der Browsername kann am Ende stehen); der gespeicherte Text wird gekürzt.
   // Ozet tam UA'dan cikarilir (tarayici adi sonda olabilir); saklanan metin kisaltilir.
   const sealed = await sealLog(env, { ip, user_agent: fullUa.slice(0, 120), fingerprint: deviceSummary(fullUa) });
   await env.DB.prepare("DELETE FROM login_logs_v2 WHERE created_at < datetime('now', ?)")
@@ -469,11 +491,14 @@ async function verifyAdminPassword(env, username, password) {
 }
 
 async function login(request, env, ip) {
+  // Die Anmeldung mit Passwort ist absichtlich deaktiviert: Das Passwort allein reicht nicht aus.
   // Parola ile giris bilerek kapali: parola tek basina yeterli degil.
+  // Die Anmeldung erfolgt ausschließlich per Fingerabdruck (Passkey) oder Wiederherstellungscode.
   // Giris yalnizca parmak izi (passkey) veya kurtarma kodu ile yapilir.
   throw new HttpError(403, 'Sadece parola ile giris kapali. Parmak izi veya kurtarma kodu kullanin.');
 }
 
+// Cloudflare Turnstile-Verifizierung (serverseitig)
 // Cloudflare Turnstile dogrulamasi (sunucu tarafi)
 async function verifyTurnstile(env, token, ip) {
   if (!env.TURNSTILE_SECRET) throw new HttpError(500, 'Dogrulama yapilandirilmamis');
@@ -551,6 +576,7 @@ async function requireSession(request, env) {
   const row = await env.DB.prepare(
     "SELECT s.token_hash, s.user_id, u.is_admin, (s.reauth_until IS NOT NULL AND s.reauth_until > datetime('now')) AS fresh FROM sessions s LEFT JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > datetime('now')"
   ).bind(await sha256(token)).first();
+  // Sitzungen ohne Benutzer (Alt-Sitzungen) werden nicht akzeptiert. Früher galten diese Sitzungen automatisch als Administratorsitzungen.
   // Kullanicisi olmayan (eski) oturum kabul edilmez. Eskiden bu oturumlar otomatik yonetici sayiliyordu.
   if (!row || row.user_id == null) return null;
   return { token_hash: row.token_hash, user_id: row.user_id, is_admin: !!row.is_admin, fresh: !!row.fresh };
@@ -753,6 +779,7 @@ async function createRelation(request, env) {
   return json({ ok: true }, 201);
 }
 
+// Massenverknüpfung: Verbindung mit allen ausgewählten Personen auf einmal
 // Toplu iliski: secilen tum kisilerle tek seferde baglanti
 async function bulkRelations(request, env) {
   const body = await readJson(request);
@@ -977,6 +1004,7 @@ function b64url(bytes) {
 }
 
 
+// ---------- Registrierung (Benutzername + Passwort + Fingerabdruck) ----------
 // ---------- Kayit (kullanici adi + parola + parmak izi) ----------
 
 const SIGNUP_USER_RE = /^[A-Za-z0-9_.-]{3,30}$/;
@@ -993,6 +1021,7 @@ async function verifyUserPassword(env, uid, password) {
   return !!u && (await verifyPassword(password, u.password_hash));
 }
 
+// Abgleich von Passwort und Benutzername (nur für abgeschlossene Konten)
 // Parola + kullanici adi eslesmesi (yalnizca tamamlanmis hesaplar)
 async function userForLogin(env, body) {
   const username = typeof body.username === 'string' ? body.username.trim().slice(0, 100) : '';
@@ -1031,6 +1060,7 @@ async function signupStart(request, env, ip, url) {
   if (password.length < 10 || password.length > 1024) throw new HttpError(400, 'Parola en az 10 karakter olmali');
   if (salt.length < 16 || salt.length > 64) throw new HttpError(400, 'Gecersiz tuz');
 
+  // Unvollständige Datensätze werden bereinigt
   // Yarim kalmis kayitlar temizlenir
   await env.DB.prepare("DELETE FROM users WHERE pending = 1 AND created_at < datetime('now', '-15 minutes')").run();
   const taken = await env.DB.prepare('SELECT id FROM users WHERE lower(username) = lower(?) AND pending = 0').bind(username).first();
@@ -1062,6 +1092,7 @@ async function signupFinish(request, env, ip, url) {
   const recHash = typeof rec.code_hash === 'string' && /^[0-9a-f]{64}$/.test(rec.code_hash) ? rec.code_hash : null;
   const recBlob = typeof rec.blob === 'string' && rec.blob.length >= 20 && rec.blob.length <= 4000 ? rec.blob : null;
   if (!recHash || !recBlob) throw new HttpError(400, 'Kurtarma kodu eksik');
+  // Der Wiederherstellungscode wird per E-Mail gesendet; der Code wird nicht auf dem Server gespeichert, es wird nur sein Hash verglichen
   // Kurtarma kodu e-postaya gonderilir; kod sunucuda tutulmaz, yalnizca ozeti karsilastirilir
   const email = typeof peek.email === 'string' ? peek.email.trim().slice(0, 254) : '';
   if (!EMAIL_RE.test(email)) throw new HttpError(400, 'Gecerli bir e-posta adresi girin');
@@ -1081,6 +1112,7 @@ async function signupFinish(request, env, ip, url) {
 }
 
 
+// Benutzerwiederherstellung: Benutzername + Wiederherstellungscode. Der Server kennt den Code nicht; der Browser entschlüsselt damit das Passwort.
 // Kullanici kurtarma: kullanici adi + kurtarma kodu. Sunucu kodu bilmez; parolayi tarayici kodla cozer.
 async function userRecoveryLogin(request, env, ip) {
   if ((await recentFailCount(env, ip)) >= MAX_FAILS) {
@@ -1109,6 +1141,7 @@ async function userRecoveryLogin(request, env, ip) {
   return json({ ok: true, blob: u.recovery_blob }, 200, { 'Set-Cookie': await passkeySessionCookie(request, env, u.id) });
 }
 
+// Neuer Wiederherstellungscode für den angemeldeten Benutzer: Der alte Code wird ungültig, der neue Code wird per E-Mail gesendet
 // Oturumdaki kullanici icin yeni kurtarma kodu: eski kod gecersiz olur, kod e-postaya gider
 async function userRecoveryRotate(request, env, session) {
   const body = await readJson(request);
@@ -1135,7 +1168,10 @@ function unb64(s) {
 }
 
 // ---- Web Push (VAPID) ----
+// ---- Web Push (VAPID) ----
+// Web Push (VAPID). Benachrichtigungen enthalten keine Inhalte: Der Server sendet eine leere Anfrage,
 // Web Push (VAPID). Bildirimler icerik tasimaz: sunucu bos istek gonderir,
+// Der service worker schreibt den Text selbst. Dadurch werden keine personenbezogenen Daten über Push-Dienste übertragen.
 // metni service worker kendisi yazar. Bu sayede kisisel veri push servislerinden gecmez.
 const VAPID_PUBLIC_KEY = 'BDUEFNLqLZF73Kdtu7qk2UbUeraEnY4dcGHKcc1hggyx2kUmcCrmRInALuCFosTcLMDwZctKKJWTZwQNBssqwH4';
 const VAPID_SUBJECT = 'https://kontakt-notizbuch.halilgercek023.workers.dev';
@@ -1288,8 +1324,11 @@ async function sendDigest(env) {
   }
 }
 
+// ---- Fingerabdruck (WebAuthn / passkey) ----
 // ---- Parmak izi (WebAuthn / passkey) ----
+// Authentifizierung anstelle des Passworts: Der Browser führt die biometrische Prüfung auf dem Gerät durch, der Server überprüft die Signatur.
 // Parola yerine gecen dogrulama: tarayici biyometriyi cihazda yapar, sunucu imzayi dogrular.
+// Standort-, Turnstile- und Brute-Force-Prüfungen werden genauso wie bei der Anmeldung angewendet.
 // Konum, Turnstile ve brute-force kontrolleri giris ile aynen uygulanir.
 const PASSKEY_MAX = 10;
 const CHALLENGE_MINUTES = 5;
@@ -1318,6 +1357,7 @@ function bytesEq(a, b) {
   return d === 0;
 }
 
+// Minimales CBOR (ausreichend für WebAuthn: uint, negint, bytes, text, array, map, bool, null)
 // Minimal CBOR (WebAuthn icin yeterli: uint, negint, bytes, text, array, map, bool, null)
 function cborDecode(bytes) {
   let pos = 0;
@@ -1347,6 +1387,7 @@ function cborDecode(bytes) {
 }
 
 // authenticatorData: rpIdHash(32) | flags(1) | signCount(4) | [aaguid(16) | credIdLen(2) | credId | COSE key]
+// authenticatorData: rpIdHash(32) | flags(1) | signCount(4) | [aaguid(16) | credIdLen(2) | credId | COSE key]
 function parseAuthData(auth) {
   const rpIdHash = auth.slice(0, 32);
   const flags = auth[32];
@@ -1368,6 +1409,7 @@ function parseAuthData(auth) {
   return { rpIdHash, flags, signCount, cred };
 }
 
+// Die WebAuthn-Signatur liegt im DER-Format vor; WebCrypto erwartet rohe r||s.
 // WebAuthn imzasi DER formatindadir; WebCrypto ham r||s bekler.
 function derToRaw(der) {
   let p = 2;
@@ -1396,9 +1438,12 @@ async function newChallenge(env, purpose) {
   return challenge;
 }
 
+// Einmalig verwendbar: wird gelöscht, unabhängig davon, ob es gefunden wird
 // Tek kullanimlik: bulunsa da bulunmasa da silinir
 async function consumeChallenge(env, purpose, challenge) {
+  // Ein einzelnes SQL DELETE ... RETURNING: Bei gleichzeitigen Anfragen für dieselbe Challenge
   // Tek SQL DELETE ... RETURNING: ayni challenge icin eszamanli isteklerden
+  // Nur eine Anfrage kann den Datensatz löschen und ein erfolgreiches Verbrauchsergebnis erhalten.
   // yalnizca biri kaydi silebilir ve basarili tuketim sonucunu alabilir.
   const row = await env.DB.prepare(
     "DELETE FROM webauthn_challenges WHERE challenge = ? AND purpose = ? AND created_at > datetime('now', ?) RETURNING challenge"
@@ -1416,6 +1461,7 @@ async function passkeyRegisterOptions(env, url, uid = 1) {
   const user = await env.DB.prepare('SELECT username FROM users WHERE id = ? AND pending = 0').bind(uid).first();
   if (!user) throw new HttpError(404, 'Kullanici bulunamadi');
   const rows = await env.DB.prepare('SELECT id FROM webauthn_credentials WHERE user_id = ?').bind(uid).all();
+  // WebAuthn user handles müssen pro Konto stabil, zwischen verschiedenen Konten jedoch unterschiedlich sein.
   // WebAuthn user handles must be stable per account, but different between accounts.
   const userHandle = b64uEncode(await digestBytes(new TextEncoder().encode(`kontakt-notizbuch-user:${uid}`)));
   return json({
@@ -1480,6 +1526,7 @@ async function verifyAssertion(env, a, url) {
     const sig = derToRaw(b64uDecode(String(a.response.signature || '')));
     if (!(await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, pub, sig, data))) return false;
 
+    // Klon-Erkennung: Wenn der Zähler gemeinsam verwendet wurde, darf er nicht zurückgehen
     // Klon tespiti: sayac birlikte kullanildiysa geri gitmemeli
     if ((parsed.signCount > 0 || row.sign_count > 0) && parsed.signCount <= row.sign_count) return false;
     await env.DB.prepare('UPDATE webauthn_credentials SET sign_count = ? WHERE id = ?').bind(parsed.signCount, row.id).run();
@@ -1536,7 +1583,9 @@ async function passkeyDelete(request, env, userId) {
   return json({ ok: true });
 }
 
+// ---- Wiederherstellungscode ----
 // ---- Kurtarma kodu ----
+// Der Code wird per E-Mail gesendet; der Server speichert nur den SHA-256-Hash des Codes und das mit dem Code verschlüsselte Passwort.
 // Kod e-postaya gonderilir; sunucu yalnizca kodun SHA-256 ozetini ve kodla sifrelenmis parolayi tutar.
 function normalizeRecoveryCode(s) {
   return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -1572,6 +1621,7 @@ async function recoveryLogin(request, env, ip, url) {
     await recordFootprint(env, request, ip, 'login', false, body.fp);
     throw new HttpError(401, 'Kurtarma kodu hatali');
   }
+  // Einmalig verwendbar: Wir können den Code nur einmal löschen (bei zwei gleichzeitigen Anmeldungen setzt sich eine durch)
   // Tek kullanimlik: kodu ancak bir kez silebiliriz (ayni anda iki giris olursa biri kazanir)
   const res = await env.DB.prepare("UPDATE recovery SET code_hash = '', blob = '' WHERE id = 1 AND code_hash = ?")
     .bind(row.code_hash).run();
@@ -1581,6 +1631,7 @@ async function recoveryLogin(request, env, ip, url) {
   return json({ ok: true, blob: row.blob }, 200, { 'Set-Cookie': await passkeySessionCookie(request, env) });
 }
 
+// Wiederherstellungs-E-Mail: dunkles Design, Inline-Stile (kompatibel mit E-Mail-Clients)
 // Kurtarma e-postasi: koyu tema, inline stiller (e-posta istemcileri uyumlu)
 function recoveryMailHtml(displayCode) {
   const safe = String(displayCode).replace(/[^A-Za-z0-9-]/g, '');
@@ -1619,6 +1670,7 @@ function recoveryMailHtml(displayCode) {
 </html>`.replace('{{CODE}}', safe);
 }
 
+// Sendet dem Benutzer einen Wiederherstellungscode (die Adresse wird nicht gespeichert)
 // Kullaniciya kurtarma kodu gonderir (adres saklanmaz)
 async function sendRecoveryMailTo(env, to, displayCode) {
   if (!env.RESEND_API_KEY) throw new Error('mail yapilandirilmamis');
@@ -1693,6 +1745,7 @@ async function storeRecovery(env, displayCodeIn, blobIn) {
   try {
     await sendRecoveryMail(env, displayCode);
   } catch {
+    // Wenn die E-Mail nicht zugestellt wurde, bleibt der alte Code gültig; der Benutzer kann es erneut versuchen
     // Mail gitmediyse eski kod degismez; kullanici tekrar deneyebilir
     throw new HttpError(502, 'E-posta gonderilemedi. Kurtarma kodu degistirilmedi.');
   }

@@ -9,6 +9,7 @@ self.addEventListener('activate', (e) => {
     .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
+// Zuerst Netzwerk: aktuelle Datei. Wenn das Netzwerk nicht verfügbar ist, Antwort aus dem Shell. API-Anfragen werden NIEMALS zwischengespeichert.
 // Once ag: guncel dosya. Ag yoksa kabuktan cevap. API istekleri ASLA onbellege alinmaz.
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
@@ -24,6 +25,7 @@ self.addEventListener('fetch', (e) => {
   );
 });
 
+// Push: Der Server sendet eine leere Anfrage. Details werden aus der Warteschlange gelesen (nur Zahlen).
 // Push: sunucu bos istek gonderir. Ayrintilar kuyruktan (sadece sayilar) okunur.
 self.addEventListener('push', (e) => {
   e.waitUntil(showDigest());

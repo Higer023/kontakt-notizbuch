@@ -1,3 +1,4 @@
+// Wiederherstellungscode: wird per E-Mail gesendet. Der Code verschlüsselt das Anmeldepasswort; der Server kennt den Code nicht.
 // Kurtarma kodu: e-postaya gonderilir. Kod, giris parolasini sifreler; sunucu kodu bilmez.
 (function () {
   const $ = (sel) => document.querySelector(sel);
@@ -12,6 +13,7 @@
     return String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   }
 
+  // 160-Bit-Zufallscode, Base32, Fünfergruppen: ABCDE-FGHJK-...
   // 160 bit rastgele kod, Base32, 5'erli gruplar: ABCDE-FGHJK-...
   function newCode() {
     const bytes = crypto.getRandomValues(new Uint8Array(20));
@@ -47,6 +49,7 @@
     return dec.decode(pt);
   }
 
+  // Überprüft anhand der Tresordaten, ob das Passwort korrekt ist, bevor neuer Code geschrieben wird
   // Yeni kod yazmadan once parolanin dogru oldugunu kasa verisiyle kontrol eder
   async function verifyVaultPassword(password) {
     const status = await api('/api/vault/status');
@@ -78,6 +81,7 @@
 
   let awaitingCode = false;
 
+  // Schritt 1: Passwort verwenden, Code generieren und per E-Mail senden
   // 1. adim: parolayi kullan, kod uret, e-postaya gonder
   async function sendRecoveryCode(password) {
     const turnstile = window.turnstile ? window.turnstile.getResponse() : '';
@@ -92,6 +96,7 @@
     $('#login-error').textContent = 'Kurtarma kodu e-postaniza gonderildi. Dogrulamayi tekrar tamamlayip ayni dugmeye basin ve kodu girin.';
   }
 
+  // Schritt 2: Code aus der E-Mail eingeben, einmalige Anmeldung
   // 2. adim: e-postadaki kodu gir, tek kullanimlik giris
   async function loginWithCode() {
     const code = prompt('E-postanizdaki kurtarma kodunu girin:');

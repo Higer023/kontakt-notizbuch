@@ -5,6 +5,7 @@ const PLATFORMS = [
   ['reddit', 'Reddit'], ['twitch', 'Twitch'], ['threads', 'Threads'], ['bluesky', 'Bluesky'], ['medium', 'Medium'],
 ];
 
+// 25 vordefinierte Beziehungen: [diese Person, Gegenüber] – ist die Beziehung für die ausgewählte Person „Mutter“, ist das Gegenüber „Kind“
 // 25 hazir iliski: [bu kisi, karsi taraf] - secilen kisi icin "annesi" ise karsi taraf "cocugu"
 const PRESETS = [
   ['annesi', 'cocugu'], ['babasi', 'cocugu'], ['kardesi', 'kardesi'], ['teyzesi', 'yegeni'],
@@ -42,6 +43,7 @@ function presetOptions() {
     + '<option value="-1">Ozel (kendiniz yazin)</option>';
 }
 
+// ---------- Netzwerkschicht ----------
 // ---------- Ag katmani ----------
 
 async function api(path, options = {}, retried = false) {
@@ -65,6 +67,7 @@ async function api(path, options = {}, retried = false) {
   return data;
 }
 
+// ---------- Standortberechtigung (erforderlich) ----------
 // ---------- Konum izni (zorunlu) ----------
 
 function getGeo() {
@@ -88,6 +91,7 @@ function getGeo() {
   });
 }
 
+// Geräte- und Browserinformationen (Fingerprint)
 // Cihaz ve tarayici bilgileri (ayak izi)
 async function getFingerprint(geo) {
   const fp = {
@@ -137,6 +141,7 @@ async function getFingerprint(geo) {
   return fp;
 }
 
+// ---------- Erneute Authentifizierung ----------
 // ---------- Yeniden dogrulama ----------
 
 function requestReauth() {
@@ -172,6 +177,7 @@ $('#reauth-dialog').addEventListener('close', () => {
   }
 });
 
+// ---------- Bei Inaktivität abmelden (15 Min.) ----------
 // ---------- Bosta kalinca oturumu kapat (15 dk) ----------
 
 const IDLE_MS = 15 * 60 * 1000;
@@ -207,6 +213,7 @@ async function idleLogout() {
   showLogin('Uzun sure islem yapilmadigi icin oturum kapatildi.');
 }
 
+// ---------- Anmeldung ----------
 // ---------- Giris ----------
 
 function showLogin(message = '') {
@@ -255,6 +262,7 @@ $('#logout-btn').addEventListener('click', async () => {
   showLogin();
 });
 
+// ---------- Tabs ----------
 // ---------- Sekmeler ----------
 
 document.querySelectorAll('.tab').forEach((btn) => {
@@ -271,6 +279,7 @@ function switchTab(tab) {
   window.scrollTo({ top: 0 });
 }
 
+// ---------- Verschlüsselte Daten (werden im Browser entschlüsselt) ----------
 // ---------- Sifreli veri (tarayicida cozulur) ----------
 
 const SOCIAL_URL = {
@@ -293,6 +302,7 @@ const USER_RE = /^[A-Za-z0-9._-]{1,100}$/;
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{2,}$/;
 const PHONE_RE = /^[+0-9 ()-]{0,30}$/;
 
+// Entschlüsselte Datensätze: id -> { id, data }. Der Server sieht diese Daten nicht.
 // Cozulmus kayitlar: id -> { id, data }. Sunucu bu veriyi gormez.
 const records = new Map();
 
@@ -383,6 +393,7 @@ function computeAge(d) {
   return age;
 }
 
+// Ansichtsmodell: Beziehungen werden bidirektional berechnet
 // Gorunum modeli: iliskiler iki yonlu hesaplanir
 function buildViews() {
   const views = new Map();
@@ -420,6 +431,7 @@ function viewById(id) {
   return buildViews().find((c) => c.id === id);
 }
 
+// ---------- Passwortentschlüsselung, Übergang, Registrierung ----------
 // ---------- Sifre cozme, gecis, kayit ----------
 
 async function loadRecords() {
@@ -430,6 +442,7 @@ async function loadRecords() {
   }
 }
 
+// Verschlüsselt und schreibt alte Klartextdatensätze einmalig (IDs bleiben erhalten)
 // Eski duz metin kayitlari bir kez sifreleyip yazar (ids korunur)
 async function migrateLegacy() {
   const legacy = await api('/api/vault/legacy');
@@ -523,6 +536,7 @@ async function removeRelation(entry) {
   await persist(entry.owner, { ...rec.data, relations: rels });
 }
 
+// ---------- Kontakte ----------
 // ---------- Kisiler ----------
 
 async function loadContacts() {
@@ -607,6 +621,7 @@ $('#search').addEventListener('input', () => {
 });
 $('#group-filter').addEventListener('change', () => loadContacts().catch(alertError));
 
+// ---------- Überprüfung ----------
 // ---------- Inceleme ----------
 
 async function openView(id) {
@@ -736,6 +751,7 @@ $('#view-body').addEventListener('submit', async (e) => {
   } catch (err) { alertError(err); }
 });
 
+// ---------- Massenbeziehung ----------
 // ---------- Toplu iliski ----------
 
 function openBulk() {
@@ -810,6 +826,7 @@ $('#bulk-confirm').addEventListener('click', async () => {
   }
 });
 
+// ---------- Hinzufügen / Bearbeiten ----------
 // ---------- Ekleme / duzenleme ----------
 
 function addSocialRow(platform = 'instagram', username = '') {
@@ -873,6 +890,7 @@ $('#contact-form').addEventListener('submit', async (e) => {
   try {
     const data = buildFormData(e.target);
     validate(data);
+    // Beim Bearbeiten bleiben bestehende Beziehungen erhalten
     // Duzenlemede mevcut iliskiler korunur
     data.relations = editingId ? (records.get(editingId)?.data.relations || []) : [];
     await persist(editingId, data);
@@ -883,6 +901,7 @@ $('#contact-form').addEventListener('submit', async (e) => {
   }
 });
 
+// ---------- Sicherheit ----------
 // ---------- Guvenlik ----------
 
 function deviceName(ua = '') {
