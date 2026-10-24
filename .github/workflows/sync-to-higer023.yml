@@ -25,7 +25,7 @@ jobs:
       SYNC_BRANCH: sync/higer23-main
     steps:
       - name: Checkout source main
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: main
           path: source
