@@ -29,6 +29,7 @@ body {
 .hidden { display: none !important; }
 .muted { color: var(--ink-soft); margin: 0; font-size: .9rem; }
 
+/* Sehr dunkler Hintergrund, sehr dezentes Pastelllicht */
 /* Cok koyu zemin, cok hafif pastel isik */
 .bg { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; background: #000; }
 .blob { position: absolute; border-radius: 50%; filter: blur(100px); opacity: .07; animation: float 34s ease-in-out infinite alternate; }

@@ -103,7 +103,9 @@ jobs:
       - name: Validate JSON and essential project files
         run: node tests/repository-integrity.test.mjs
 
+  # Legacy-Branch-Regeln erfordern möglicherweise weiterhin den exakten Statusprüfungsnamen "test".
   # Legacy branch rules may still require the exact status-check name "test".
+  # Diese Gesamtprüfung behält diesen Namen bei und schlägt fehl, wenn eine der Quality Gates fehlschlägt.
   # This aggregate check preserves that name and fails if any quality gate fails.
   test:
     name: test

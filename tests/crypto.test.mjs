@@ -1,3 +1,4 @@
+// Node-WebCrypto-basierte Regressionstests für die clientseitige Browser-Verschlüsselung.
 // Tarayici istemci sifrelemesi icin Node WebCrypto tabanli regresyon testleri.
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';

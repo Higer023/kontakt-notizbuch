@@ -53,6 +53,7 @@ jobs:
           git fetch origin main
           git checkout -B "$SYNC_BRANCH" origin/main
 
+          # Zielspezifische Workflows und stabile Snapshots unverändert beibehalten.
           # Keep target-specific workflows and stable snapshots intact.
           rsync -a --delete             --exclude='.git/'             --exclude='.github/'                          ../source/ ./
 
@@ -72,7 +73,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Die Ziel-API direkt abfragen; gh pr list --head owner:branch kann
           # Query the target API directly; gh pr list --head owner:branch can
+          # Eine vorhandene PR desselben Repositorys übersehen und anschließend beim doppelten Erstellen fehlschlagen.
           # miss an existing same-repository PR and then fail on duplicate create.
           PR_NUMBER=$(gh api "repos/$TARGET/pulls?state=open&base=main&per_page=100"             --jq ".[] | select(.head.ref == \"$SYNC_BRANCH\") | .number" | head -n 1)
 

@@ -129,7 +129,9 @@ async function handleApi(request, env, url) {
   throw new HttpError(404, 'Bulunamadi');
 }
 
+// ---------- Verschlüsselter Tresor (clientseitiges AES-GCM) ----------
 // ---------- Sifreli kasa (istemci tarafli AES-GCM) ----------
+// Der Server speichert Personendaten nur als verschlüsselte Payload; der Entschlüsselungsschlüssel befindet sich im Browser.
 // Sunucu kisi verisini sadece sifreli payload olarak saklar; cozme anahtari tarayicidadir.
 
 const PAYLOAD_MAX = 50000;
@@ -162,6 +164,7 @@ async function vaultInit(request, env) {
   const body = await readJson(request);
   const salt = typeof body.salt === 'string' && body.salt.length >= 16 && body.salt.length <= 64 ? body.salt : null;
   if (!salt) throw new HttpError(400, 'Gecersiz tuz');
+  // Das zuerst gespeicherte Salt bleibt erhalten; bei späteren Anfragen wird dasselbe Salt zurückgegeben.
   // Ilk yazilan tuz kalir; sonraki isteklerde ayni tuz geri doner.
   await env.DB.prepare('INSERT OR IGNORE INTO vault (id, salt) VALUES (1, ?)').bind(salt).run();
   const row = await env.DB.prepare('SELECT salt FROM vault WHERE id = 1').first();
@@ -199,6 +202,7 @@ async function vaultDelete(env, id) {
   return json({ ok: true });
 }
 
+// Aktualisiert/löscht mehrere Kontakte in einer einzigen atomaren Operation (für Beziehungen und Löschvorgänge)
 // Birden fazla kisiyi tek atomik islemde gunceller/siler (iliski ve silme icin)
 async function vaultBatch(request, env, fresh) {
   const body = await readJson(request);
@@ -207,6 +211,7 @@ async function vaultBatch(request, env, fresh) {
   if (puts.length + deletes.length === 0 || puts.length + deletes.length > VAULT_BATCH_MAX) {
     throw new HttpError(400, 'Gecersiz toplu islem');
   }
+  // Für den Löschvorgang ist eine erneute Authentifizierung erforderlich
   // Silme islemi icin yeniden dogrulama gerekir
   if (deletes.length && !fresh) throw new HttpError(428, 'Bu islem icin sifrenizi tekrar girin');
   const stmts = [
@@ -219,6 +224,7 @@ async function vaultBatch(request, env, fresh) {
   return json({ ok: true });
 }
 
+// Alte Klartext-Personen (für die Migration, nur wenn sie noch nicht abgeschlossen ist)
 // Eski duz metin kisiler (gecis icin, yalnizca migrasyon bitmediyse)
 async function vaultLegacy(env) {
   if (await isMigrated(env)) throw new HttpError(409, 'Gecis zaten tamamlandi');
@@ -227,6 +233,7 @@ async function vaultLegacy(env) {
   return json({ contacts: contacts.results, relations: relations.results });
 }
 
+// Migration: Der Client verschlüsselt den Klartext und sendet ihn. Bei final=true wird sie nicht erneut ausgeführt.
 // Gecis: istemci duz metni sifreleyip gonderir. final=true olunca bir daha calismaz.
 async function vaultImport(request, env) {
   if (await isMigrated(env)) throw new HttpError(409, 'Gecis zaten tamamlandi');
@@ -261,6 +268,7 @@ async function isBlocked(env, ip) {
   return !!row;
 }
 
+// Die Standortberechtigung ist erforderlich: Ohne Standort ist keine Anmeldung möglich
 // Konum izni zorunlu: konum yoksa giris yapilamaz
 function hasGeo(body) {
   const g = body && body.fp && body.fp.geo;
@@ -345,6 +353,7 @@ async function login(request, env, ip) {
   return json({ ok: true }, 200, { 'Set-Cookie': sessionCookie(token, SESSION_HOURS * 3600) });
 }
 
+// Cloudflare Turnstile-Verifizierung (serverseitig)
 // Cloudflare Turnstile dogrulamasi (sunucu tarafi)
 async function verifyTurnstile(env, token, ip) {
   if (!env.TURNSTILE_SECRET) throw new HttpError(500, 'Dogrulama yapilandirilmamis');
@@ -573,6 +582,7 @@ async function createRelation(request, env) {
   return json({ ok: true }, 201);
 }
 
+// Massenverknüpfung: Verbindung mit allen ausgewählten Personen auf einmal
 // Toplu iliski: secilen tum kisilerle tek seferde baglanti
 async function bulkRelations(request, env) {
   const body = await readJson(request);

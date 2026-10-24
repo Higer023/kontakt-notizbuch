@@ -29,6 +29,7 @@ body {
 .hidden { display: none !important; }
 .muted { color: var(--ink-soft); margin: 0; font-size: .9rem; }
 
+/* Sehr dunkler Hintergrund, sehr dezentes Pastelllicht */
 /* Cok koyu zemin, cok hafif pastel isik */
 .bg { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; background: #000; }
 .blob { position: absolute; border-radius: 50%; filter: blur(100px); opacity: .07; animation: float 34s ease-in-out infinite alternate; }
@@ -269,6 +270,7 @@ dialog.sheet::backdrop { background: rgba(0,0,0,.75); backdrop-filter: blur(10px
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 
+/* Zusammenfassungsleiste */
 /* Ozet cubugu */
 .head-actions { display: flex; gap: 8px; align-items: center; }
 .stats-bar { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 0 0 12px; }
@@ -277,6 +279,7 @@ dialog.sheet::backdrop { background: rgba(0,0,0,.75); backdrop-filter: blur(10px
 .stats-bar span { font-size: .72rem; color: var(--ink-soft); }
 .stats-bar .stats-latest { grid-column: 1 / -1; text-align: left; font-size: .85rem; color: var(--ink-soft); }
 
+/* Beziehungskarte */
 /* Iliski haritasi */
 .graph-box { width: 100%; aspect-ratio: 1 / 1; max-height: 70vh; border-radius: 22px; border: 1px solid var(--line); background: rgba(255,255,255,.02); overflow: hidden; }
 .graph-box svg { width: 100%; height: 100%; display: block; }
@@ -287,6 +290,7 @@ dialog.sheet::backdrop { background: rgba(0,0,0,.75); backdrop-filter: blur(10px
 .graph-box .node text { fill: var(--ink); font-size: 11px; text-anchor: middle; pointer-events: none; }
 .graph-box .node:hover circle { stroke-width: 2.5; }
 
+/* Helles Design */
 /* Acik tema */
 :root[data-theme="light"] {
   --bg: #f4f4f7; --ink: #111114; --ink-soft: #5d5d66;

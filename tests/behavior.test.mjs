@@ -1,4 +1,5 @@
 
+// Verhaltenstests: Führt den Worker mit SQLite (sql.js) im Arbeitsspeicher aus. Keine Netzwerk- oder Turnstile-Aufrufe.
 // Davranissal testler: Worker'i bellek ici SQLite (sql.js) ile calistirir. Ag ve Turnstile cagrisi yok.
 import { readFileSync } from 'node:fs';
 import initSqlJs from 'sql.js';
@@ -6,6 +7,7 @@ import assert from 'node:assert/strict';
 import worker from '../src/worker.js';
 
 const SQL = await initSqlJs();
+// Festgelegter Schlüssel nur für Tests (32 Byte). KEIN echter Schlüssel.
 // Sadece test icin sabit anahtar (32 bayt). Gercek anahtar DEGIL.
 const TEST_LOG_KEY = Buffer.from(new Uint8Array(32).fill(7)).toString('base64');
 const schema = readFileSync(new URL('../schema.sql', import.meta.url), 'utf8');
@@ -57,6 +59,7 @@ await test('sema iki kez uygulanabilir (idempotent)', async () => {
 
 await test('oturumsuz korunan uc 401 doner (GET /api/sessions)', async () => {
   const { env: e } = env();
+  // Das Schema muss eingerichtet sein
   // sema kurulu olmali
   const { db, DB } = makeDb(); db.exec(schema);
   const res = await worker.fetch(req('GET', '/api/sessions'), { ...e, DB });
@@ -79,6 +82,7 @@ await test('oturumsuz bilinmeyen api yolu 401 doner (yol kesfi engellenir)', asy
 
 
 
+// ---------- Sitzungsgebundene Anfragen: Hilfsfunktionen ----------
 // ---------- Oturumlu istekler: yardimcilar ----------
 import { createHash } from 'node:crypto';
 const sha256hex = (t) => createHash('sha256').update(t).digest('hex');
@@ -164,9 +168,11 @@ await test('kullanici izolasyonu: kullanici 2, kullanici 1 kaydini silemez', asy
   assert.ok(JSON.stringify(await r1.json()).includes(payload), 'kullanici 2 kullanici 1 kaydini sildi');
 });
 
+// Import- und Alt-Datenregeln: Diese Tests stellen sicher, dass Korrekturen erhalten bleiben.
 // Ice aktarma ve eski veri kurallari: duzeltmeler bu testlerle korunur.
 await test('ice aktarilan kayit sahibi kullaniciya gorunur (user_id dogru)', async () => {
   const { db, DB } = makeDb(); db.exec(schema); seedUsers(db);
+  // Der Import erfordert einen Administrator und eine aktuelle Sitzung: Benutzer 1 zum Administrator machen und die erneute Verifizierung aktuell halten.
   // Ice aktarma yonetici ve taze oturum ister: kullanici 1'i yonetici yap, yeniden dogrulamayi taze tut.
   db.exec("UPDATE users SET is_admin = 1 WHERE id = 1");
   db.exec("UPDATE sessions SET reauth_until = datetime('now', '+5 minutes') WHERE user_id = 1");
@@ -200,6 +206,7 @@ await test('ice aktarma baska kullanicinin ayni kimlikli kaydini ezmez', async (
 });
 
 
+// ---------- Berechtigungsprüfung: Jeder nicht öffentliche /api-Pfad muss ohne Sitzung 401 zurückgeben ----------
 // ---------- Yetki denetimi: herkese acik olmayan her /api yolu oturumsuz 401 donmeli ----------
 import { readFileSync as rfs } from 'node:fs';
 const workerSrc = rfs(new URL('../src/worker.js', import.meta.url), 'utf8');
@@ -248,11 +255,13 @@ await test('giris kaydi ham parmak izi icermez, cihaz ozeti tutar', async () => 
   const { db, DB } = makeDb(); db.exec(schema); seedUsers(db);
   db.exec("UPDATE users SET is_admin = 1 WHERE id = 1");
   const ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+  // reauth: Der Datensatz wird geschrieben (der Fingerabdruck wurde gesendet); wegen des falschen Passworts kommt es zu 401
   // reauth: kayit yazilir (parmak izi gonderildi), parola yanlis oldugu icin 401
   const r = await worker.fetch(new Request('https://example.test/api/reauth', {
     method: 'POST', headers: { cookie: 'session=' + U1, 'content-type': 'application/json', origin: 'https://example.test', 'user-agent': ua },
     body: JSON.stringify({ fp: { screen: '390x844', tz: 'Europe/Istanbul', canvas: 'SECRET-RAW-FP' } }),
   }), envFor(DB));
+  // Falsches Passwort -> 401; der Log-Test ist gültig, da der Datensatz trotzdem geschrieben wird.
   // Parola yanlis -> 401; kayit yine de yazildigi icin log testi gecerli.
   assert.equal(r.status, 401, `beklenen 401, gelen ${r.status}`);
   db.exec("UPDATE sessions SET reauth_until = datetime('now', '+5 minutes') WHERE user_id = 1");
